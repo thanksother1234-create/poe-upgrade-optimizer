@@ -38,6 +38,11 @@ interface TradeFetchResponse {
   result?: unknown;
 }
 
+interface TradeProxyResponse extends TradeFetchResponse {
+  queryId?: unknown;
+  error?: unknown;
+}
+
 export class LiveTradeError extends Error {
   constructor(message: string, public readonly status = 502) {
     super(message);
@@ -173,6 +178,8 @@ export class LiveTradeMarketService implements TradeMarketService {
   constructor(
     userAgent = process.env.POE_USER_AGENT,
     private readonly itemsPerSlot = DEFAULT_ITEMS_PER_SLOT,
+    private readonly engineUrl = process.env.POB_ENGINE_URL,
+    private readonly engineToken = process.env.POB_ENGINE_TOKEN,
   ) {
     this.userAgent = normalizePoeUserAgent(userAgent);
   }
@@ -192,6 +199,37 @@ export class LiveTradeMarketService implements TradeMarketService {
     return item.price;
   }
 
+  private async searchThroughEngine(query: Record<string, unknown>, league: string, slot: EquipmentSlot): Promise<TradeItem[]> {
+    const baseUrl = this.engineUrl?.endsWith("/") ? this.engineUrl : `${this.engineUrl}/`;
+    const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
+    if (this.engineToken) headers.Authorization = `Bearer ${this.engineToken}`;
+
+    let response: Response;
+    try {
+      response = await fetch(new URL("trade/listings", baseUrl), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ league, query, limit: FETCH_BATCH_SIZE, userAgent: this.userAgent }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(65_000),
+      });
+    } catch (error) {
+      const message = error instanceof Error && error.name === "TimeoutError"
+        ? "The hosted trade gateway timed out while waiting for Path of Exile."
+        : "The hosted trade gateway is unavailable.";
+      throw new LiveTradeError(message, 503);
+    }
+
+    const payload = await response.json().catch(() => ({})) as TradeProxyResponse;
+    if (!response.ok) {
+      const message = typeof payload.error === "string" ? payload.error : `The hosted trade gateway returned ${response.status}.`;
+      throw new LiveTradeError(message, response.status === 429 ? 429 : 502);
+    }
+    const queryId = text(payload.queryId);
+    const entries = Array.isArray(payload.result) ? payload.result as TradeFetchEntry[] : [];
+    return entries.map((entry) => mapListing(entry, slot, league, queryId)).filter((item): item is TradeItem => Boolean(item)).slice(0, this.itemsPerSlot);
+  }
+
   private async search(category: string | null, baseType: string, budget: CurrencyAmount, league: string, slot: EquipmentSlot): Promise<TradeItem[]> {
     const filters: Record<string, unknown> = {
       trade_filters: { filters: { sale_type: { option: "priced" }, price: { max: toChaos(budget) } } },
@@ -207,6 +245,8 @@ export class LiveTradeMarketService implements TradeMarketService {
       },
       sort: { price: "desc" },
     };
+    if (this.engineUrl) return this.searchThroughEngine(query, league, slot);
+
     const searchResponse = await fetch(`https://www.pathofexile.com/api/trade/search/${encodeURIComponent(league)}`, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": this.userAgent },

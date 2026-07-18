@@ -21,7 +21,7 @@ const result = spawnSync(command, [
   spaceId,
   engineDirectory,
   ".",
-  "--repo-type",
+  "--type",
   "space",
   "--commit-message",
   "Deploy PoE Upgrade Optimizer engine",

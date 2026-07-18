@@ -4,8 +4,9 @@ PoE Upgrade Optimizer imports a Path of Building build, fetches real listings fr
 
 ## Architecture
 
-- The Vinext/Vite/Next application runs on Vercel and owns the UI, league discovery, live trade search, validation, and ranking.
-- [`pob-engine`](./pob-engine) is a small Docker service containing LuaJIT and Path of Building `v2.65.0`. Vercel calls this service to evaluate the baseline and every candidate.
+- The Vinext/Vite/Next application runs on Vercel and owns the UI, league discovery, validation, and ranking.
+- [`pob-engine`](./pob-engine) is a small authenticated Docker service containing LuaJIT and Path of Building `v2.65.0`. It performs the live trade requests from Hugging Face and evaluates the baseline and every candidate because Path of Exile blocks Vercel's shared outbound network.
+- The hosted trade gateway spaces PoE searches at least 2.1 seconds apart, spaces listing fetches at least 400 milliseconds apart, and shares identical results for 30 seconds to reduce upstream traffic.
 - A live listing's `extended.text` field is decoded and inserted into the imported build XML. The worker then reads PoB's real `mainOutput` metrics; the TypeScript estimator is not used by the live endpoint.
 
 Exact combinations are intentionally not displayed yet. Adding individual verified deltas together can be wrong when modifiers interact, so the live result only claims what PoB actually recalculated.
@@ -40,7 +41,7 @@ POB_ENGINE_TOKEN=the-same-long-random-token
 POE_USER_AGENT=OAuth PoEUpgradeOptimizer/0.2 (contact: your-email@example.com)
 ```
 
-Redeploy Vercel after setting the variables. The optimizer returns an explicit configuration error instead of silently falling back to estimated item stats if the engine is missing or unavailable.
+Redeploy both the Hugging Face engine and Vercel after setting the variables. `POE_USER_AGENT` remains server-only: Vercel forwards it only inside the bearer-token-protected engine request, and neither service logs its value. The optimizer returns an explicit configuration error instead of silently falling back to estimated item stats if the engine is missing or unavailable.
 
 Future worker updates can be uploaded from this repository with:
 

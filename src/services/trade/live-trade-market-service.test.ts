@@ -45,6 +45,51 @@ describe("LiveTradeMarketService", () => {
     expect(items[0].tradeUrl).toContain("/trade/search/Standard/search123");
   });
 
+  it("routes trade traffic through the authenticated hosted engine when configured", async () => {
+    const rawText = "Item Class: Rings\r\nRarity: RARE\r\nDoom Loop\r\nOpal Ring\r\n--------\r\n+70 to maximum Life";
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      expect(String(url)).toBe("https://engine.example/trade/listings");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer engine-secret");
+      const request = JSON.parse(String(init?.body)) as {
+        league: string;
+        limit: number;
+        userAgent: string;
+        query: { query: { filters: { type_filters: { filters: { category: { option: string } } } } } };
+      };
+      expect(request).toMatchObject({
+        league: "Mirage",
+        limit: 10,
+        userAgent: "OAuth TestAgent/1.0 (contact: owner@example.com)",
+      });
+      expect(request.query.query.filters.type_filters.filters.category.option).toBe("accessory.ring");
+      return Response.json({
+        queryId: "proxied-search",
+        result: [{
+          id: "proxied-listing",
+          listing: { price: { amount: 1, currency: "divine" } },
+          item: {
+            name: "Doom Loop", typeLine: "Opal Ring", baseType: "Opal Ring", rarity: "Rare",
+            icon: "https://web.poecdn.com/item.png",
+            explicitMods: [{ description: "+70 to maximum Life" }],
+            extended: { text: Buffer.from(rawText).toString("base64") },
+          },
+        }],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const items = await new LiveTradeMarketService(
+      "OAuth TestAgent/1.0 (contact: owner@example.com)",
+      3,
+      "https://engine.example",
+      "engine-secret",
+    ).searchUpgrades(structuredClone(mockBuild), "ring1", { amount: 5, currency: "divine" }, "Mirage");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(items[0]).toMatchObject({ id: "proxied-listing", tradeUrl: "https://www.pathofexile.com/trade/search/Mirage/proxied-search" });
+  });
+
   it("normalizes the required OAuth User-Agent prefix", () => {
     expect(normalizePoeUserAgent("PoEUpgradeOptimizer/0.2 (contact: owner@example.com)"))
       .toBe("OAuth PoEUpgradeOptimizer/0.2 (contact: owner@example.com)");
