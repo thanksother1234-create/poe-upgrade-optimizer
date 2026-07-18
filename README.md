@@ -37,7 +37,7 @@ Deploy [`pob-engine`](./pob-engine) as a Hugging Face Pro Docker Space by follow
 ```dotenv
 POB_ENGINE_URL=https://your-pob-engine.example.com
 POB_ENGINE_TOKEN=the-same-long-random-token
-POE_USER_AGENT=PoEUpgradeOptimizer/0.2 (contact: your-email@example.com)
+POE_USER_AGENT=OAuth PoEUpgradeOptimizer/0.2 (contact: your-email@example.com)
 ```
 
 Redeploy Vercel after setting the variables. The optimizer returns an explicit configuration error instead of silently falling back to estimated item stats if the engine is missing or unavailable.

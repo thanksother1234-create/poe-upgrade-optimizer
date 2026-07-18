@@ -53,7 +53,7 @@ The root URL and `GET /health` are public status endpoints. `POST /evaluate` req
    ```dotenv
    POB_ENGINE_URL=https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space
    POB_ENGINE_TOKEN=the-exact-same-value-as-ENGINE_TOKEN
-   POE_USER_AGENT=PoEUpgradeOptimizer/0.2 (contact: your-email@example.com)
+   POE_USER_AGENT=OAuth PoEUpgradeOptimizer/0.2 (contact: your-email@example.com)
    ```
 
 Do not add a trailing `/evaluate` to `POB_ENGINE_URL`; the web app appends that route. CPU Basic can sleep after extended inactivity, so the first optimization after a long idle period can take longer while the container wakes.
@@ -73,7 +73,7 @@ Docker Compose keeps the local endpoint at port `4317` even though the container
 ```dotenv
 POB_ENGINE_URL=http://127.0.0.1:4317
 POB_ENGINE_TOKEN=local-development-token
-POE_USER_AGENT=PoEUpgradeOptimizer/0.2 (contact: your-email@example.com)
+POE_USER_AGENT=OAuth PoEUpgradeOptimizer/0.2 (contact: your-email@example.com)
 ```
 
 The image pins Path of Building `v2.65.0`. Change the `POB_VERSION` Docker build argument when a newer compatible release is available, then redeploy the service and rerun the regression tests.
