@@ -5,15 +5,15 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowRight, Check, CheckCircle2, CircleDollarSign, ClipboardPaste, Copy, DatabaseZap, Gauge,
   ExternalLink, HeartPulse, Import, Loader2, LockKeyhole, PackageSearch, Scale, Search, Shield,
-  Sparkles, Sword, Trash2, WandSparkles, Wifi, WifiOff, Zap,
+  RotateCcw, SlidersHorizontal, Sparkles, Sword, Trash2, WandSparkles, Wifi, WifiOff, Zap,
 } from "lucide-react";
 import { Build, CandidateEvaluation, CurrencyAmount, EQUIPMENT_SLOTS, EquipmentSlot, LeagueResponse, OptimizationGoal, OptimizationResult, PoeLeague, TradeItem, UpgradeRecommendation } from "@/models";
 import { MvpPobCalculationService } from "@/services/pob/pob-calculation-service";
 import { isPermanentLeague } from "@/services/league/league-service";
 import { formatNumber, formatPrice, percentChange } from "@/lib/metrics";
 import { isManualCandidateCompatible, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
-import { createTradeSiteUrl } from "@/services/trade/trade-search-service";
-import { createWeightedTradeSearch, formatWeightedSearchRecipe, type WeightedTradeSearchDraft } from "@/services/trade/weighted-search-service";
+import { createEncodedTradeSearchUrl } from "@/services/trade/trade-search-service";
+import { createWeightedTradeSearch, customizeWeightedTradeSearch, type WeightedTradeSearchCustomization, type WeightedTradeSearchDraft } from "@/services/trade/weighted-search-service";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,29 @@ interface ManualCandidate {
   rawText: string;
   price: CurrencyAmount;
   item: TradeItem;
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // Fall back to a temporary selection for browsers that deny Clipboard API access.
+    }
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+  textArea.setSelectionRange(0, textArea.value.length);
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  if (!copied) throw new Error("Clipboard access was denied.");
 }
 
 function SectionHeading({ number, eyebrow, title, icon: Icon }: { number: string; eyebrow: string; title: string; icon: typeof Activity }) {
@@ -133,6 +156,62 @@ function CandidateEvaluationCard({ evaluation, baseline }: { evaluation: Candida
   </Card>;
 }
 
+function WeightedSearchEditor({
+  slot,
+  draft,
+  league,
+  copied,
+  onWeightChange,
+  onToggle,
+  onMinimumChange,
+  onReset,
+  onCopy,
+  onDone,
+}: {
+  slot: EquipmentSlot;
+  draft: WeightedTradeSearchDraft;
+  league: string;
+  copied: boolean;
+  onWeightChange: (id: string, weight: number) => void;
+  onToggle: (id: string, enabled: boolean) => void;
+  onMinimumChange: (minimum: number) => void;
+  onReset: () => void;
+  onCopy: () => void;
+  onDone: () => void;
+}) {
+  const tradeUrl = createEncodedTradeSearchUrl(league, draft.request);
+  const minimumScore = draft.request.query.stats[0].value.min;
+  const activeOptions = draft.options.filter((option) => option.weight !== 0).length;
+
+  return <Card className="gap-0 overflow-hidden border-primary/25 bg-background/55 py-0 shadow-inner sm:col-span-2">
+    <CardHeader className="flex flex-row items-start justify-between gap-4 border-b border-border/70 px-5 py-4">
+      <div><CardDescription className="text-xs font-medium text-primary">{slotLabels[slot]} weighted sum</CardDescription><CardTitle className="mt-1 font-heading text-xl">Tune the stat multipliers</CardTitle><p className="mt-1 text-xs leading-5 text-muted-foreground">These suggestions come from your build and selected goal. Set a stat to 0 to leave it out, or use a negative value to penalize it.</p></div>
+      <Badge variant="secondary" className="shrink-0">{activeOptions} active</Badge>
+    </CardHeader>
+    <CardContent className="space-y-4 p-5">
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card/55 p-4 sm:flex-row sm:items-end sm:justify-between">
+        <div><p className="text-sm font-medium">Minimum weighted score</p><p className="mt-1 text-xs text-muted-foreground">PoE Trade will hide results scoring below this value.</p></div>
+        <Input type="number" step="0.1" value={minimumScore} onChange={(event) => onMinimumChange(Number(event.target.value) || 0)} aria-label="Minimum weighted score" className="h-10 w-full bg-background/70 font-mono sm:w-32" />
+      </div>
+      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card/35">
+        {draft.options.map((option) => <div key={option.id} className="grid grid-cols-[auto_minmax(0,1fr)_6.5rem] items-center gap-3 p-3 sm:gap-4 sm:px-4">
+          <Checkbox checked={option.weight !== 0} onCheckedChange={(checked) => onToggle(option.id, checked === true)} aria-label={`${option.weight !== 0 ? "Disable" : "Enable"} ${option.label}`} />
+          <div className="min-w-0"><p className={cn("truncate text-sm font-medium", option.weight === 0 && "text-muted-foreground line-through")}>{option.label}</p><p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">{option.reason}</p></div>
+          <div className="relative"><span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 font-mono text-xs text-muted-foreground">×</span><Input type="number" step="0.01" value={option.weight} onChange={(event) => onWeightChange(option.id, Number(event.target.value) || 0)} aria-label={`Weight for ${option.label}`} className="h-9 bg-background/70 pl-6 text-right font-mono" /></div>
+        </div>)}
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
+        <Button variant="ghost" onClick={onReset}><RotateCcw />Reset suggestions</Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" onClick={onCopy}>{copied ? <Check /> : <Copy />}{copied ? "Link copied" : "Copy weighted link"}</Button>
+          <Button variant="outline" onClick={onDone}>Done editing</Button>
+          <Button asChild><a href={tradeUrl} target="_blank" rel="noopener noreferrer">Open weighted search<ExternalLink /></a></Button>
+        </div>
+      </div>
+    </CardContent>
+  </Card>;
+}
+
 export default function OptimizerDashboard() {
   const [pobCode, setPobCode] = useState("");
   const [build, setBuild] = useState<Build | null>(null);
@@ -158,6 +237,8 @@ export default function OptimizerDashboard() {
   const [candidateError, setCandidateError] = useState("");
   const [copiedWeightedSlot, setCopiedWeightedSlot] = useState<EquipmentSlot | null>(null);
   const [weightedSearchError, setWeightedSearchError] = useState("");
+  const [weightEditorSlot, setWeightEditorSlot] = useState<EquipmentSlot | null>(null);
+  const [weightedCustomizations, setWeightedCustomizations] = useState<Partial<Record<EquipmentSlot, WeightedTradeSearchCustomization>>>({});
 
   useEffect(() => {
     let active = true;
@@ -172,17 +253,24 @@ export default function OptimizerDashboard() {
   }, []);
 
   const leagueGroups = useMemo(() => ({ challenge: leagues.filter((item) => !isPermanentLeague(item)).length, permanent: leagues.filter(isPermanentLeague).length }), [leagues]);
-  const weightedSearches = useMemo<Partial<Record<EquipmentSlot, WeightedTradeSearchDraft>>>(() => {
+  const baseWeightedSearches = useMemo<Partial<Record<EquipmentSlot, WeightedTradeSearchDraft>>>(() => {
     if (!build) return {};
     return Object.fromEntries(slots.map((slot) => [
       slot,
       createWeightedTradeSearch(build, slot, goal, { amount: budget, currency }),
     ]));
   }, [budget, build, currency, goal, slots]);
+  const weightedSearches = useMemo<Partial<Record<EquipmentSlot, WeightedTradeSearchDraft>>>(() => Object.fromEntries(
+    slots.flatMap((slot) => {
+      const draft = baseWeightedSearches[slot];
+      return draft ? [[slot, customizeWeightedTradeSearch(draft, weightedCustomizations[slot])]] : [];
+    }),
+  ), [baseWeightedSearches, slots, weightedCustomizations]);
   const importBuild = async () => {
     try {
       setImporting(true); setError(""); setOptimizationError("");
       setBuild(await pobService.importBuild(pobCode)); setResult(null); setCandidates([]); setCandidateError("");
+      setWeightEditorSlot(null); setWeightedCustomizations({}); setWeightedSearchError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Import failed");
     } finally { setImporting(false); }
@@ -240,6 +328,7 @@ export default function OptimizerDashboard() {
     const next = slots.includes(slot) ? slots.filter((item) => item !== slot) : [...slots, slot];
     setSlots(next);
     if (!next.includes(candidateSlot) && next[0]) setCandidateSlot(next[0]);
+    if (weightEditorSlot === slot && !next.includes(slot)) setWeightEditorSlot(null);
   };
   const removeCandidate = (id: string) => {
     setCandidates((current) => current.filter((candidate) => candidate.id !== id));
@@ -251,12 +340,40 @@ export default function OptimizerDashboard() {
 
     try {
       setWeightedSearchError("");
-      await navigator.clipboard.writeText(formatWeightedSearchRecipe(draft, league));
+      await copyText(createEncodedTradeSearchUrl(league, draft.request));
       setCopiedWeightedSlot(slot);
       window.setTimeout(() => setCopiedWeightedSlot((current) => current === slot ? null : current), 3_000);
     } catch {
-      setWeightedSearchError("PoE Trade opened, but the browser blocked clipboard access. Allow clipboard access and click the link again.");
+      setWeightedSearchError("Your browser blocked clipboard access. The Open weighted search button still works without the clipboard.");
     }
+  };
+  const updateWeightedWeight = (slot: EquipmentSlot, id: string, weight: number) => {
+    setWeightedCustomizations((current) => ({
+      ...current,
+      [slot]: {
+        ...current[slot],
+        weights: { ...current[slot]?.weights, [id]: weight },
+      },
+    }));
+  };
+  const updateWeightedMinimum = (slot: EquipmentSlot, minimumScore: number) => {
+    setWeightedCustomizations((current) => ({
+      ...current,
+      [slot]: { ...current[slot], minimumScore },
+    }));
+  };
+  const resetWeightedSearch = (slot: EquipmentSlot) => {
+    setWeightedCustomizations((current) => {
+      const next = { ...current };
+      delete next[slot];
+      return next;
+    });
+  };
+  const toggleWeightedOption = (slot: EquipmentSlot, id: string, enabled: boolean) => {
+    const currentOption = weightedSearches[slot]?.options.find((option) => option.id === id);
+    const generatedOption = baseWeightedSearches[slot]?.options.find((option) => option.id === id);
+    if (!currentOption || !generatedOption) return;
+    updateWeightedWeight(slot, id, enabled ? generatedOption.weight : 0);
   };
   const prepareManualSearch = () => document.getElementById("manual-candidates")?.scrollIntoView({ behavior: "smooth" });
 
@@ -292,7 +409,7 @@ export default function OptimizerDashboard() {
           <Card className="border-white/[0.07] bg-card/90 shadow-[0_24px_60px_-48px_rgba(0,0,0,0.95)]"><CardHeader><SectionHeading number="2" eyebrow="Review" title="What you&apos;re wearing" icon={PackageSearch} /></CardHeader><CardContent className="grid gap-2 sm:grid-cols-2">{EQUIPMENT_SLOTS.map((slot) => { const item = build.equipment[slot]; return <Card key={slot} className="gap-3 border-border/70 bg-background/35 p-4 shadow-none transition-colors hover:bg-background/50"><div className="flex items-start gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/5 font-heading text-primary">{slotLabels[slot].charAt(0)}</div><div className="min-w-0"><p className="text-xs font-medium text-muted-foreground">{slotLabels[slot]}</p><p className={cn("mt-1 truncate font-heading text-sm font-semibold", item.rarity === "unique" ? "text-orange-400" : item.rarity === "magic" ? "text-indigo-300" : item.rarity === "rare" ? "text-amber-100" : "text-muted-foreground")}>{item.name}</p><p className="truncate text-[11px] text-muted-foreground">{item.baseType}</p></div></div>{item.modifiers.length > 0 && <div className="space-y-1 border-t border-border/60 pt-3">{item.modifiers.slice(0, 2).map((modifier, index) => <p key={`${modifier.label}-${index}`} className="truncate text-[10px] text-muted-foreground">+ {modifier.label}</p>)}</div>}</Card>; })}</CardContent></Card>
 
           <Card className="border-white/[0.07] bg-card/90 shadow-[0_24px_60px_-48px_rgba(0,0,0,0.95)]"><CardHeader><SectionHeading number="3" eyebrow="Preferences" title="What are you looking for?" icon={Activity} /></CardHeader><CardContent className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-[1fr_180px]"><div className="space-y-2"><Label htmlFor="budget">Budget</Label><div className="flex"><Input id="budget" type="number" min="1" value={budget} onChange={(event) => setBudget(Math.max(1, Number(event.target.value)))} className="h-11 rounded-r-none bg-background/60 font-mono text-lg" /><Select value={currency} onValueChange={(value) => setCurrency(value as "chaos" | "divine")}><SelectTrigger className="h-11 w-32 rounded-l-none border-l-0 bg-background/60"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="divine">Divine</SelectItem><SelectItem value="chaos">Chaos</SelectItem></SelectContent></Select></div></div><div className="space-y-2"><Label>Market</Label><div className="flex h-11 items-center gap-2 rounded-lg border border-input bg-background/60 px-3 text-sm"><CircleDollarSign className="size-4 text-primary" /><span className="truncate">{league}</span></div></div></div>
+            <div className="grid gap-4 sm:grid-cols-[1fr_180px]"><div className="space-y-2"><Label htmlFor="budget">Budget</Label><div className="grid grid-cols-[minmax(0,1fr)_8rem]"><Input id="budget" type="number" min="1" value={budget} onChange={(event) => setBudget(Math.max(1, Number(event.target.value)))} className="h-11 rounded-r-none bg-background/60 font-mono text-lg" /><Select value={currency} onValueChange={(value) => setCurrency(value as "chaos" | "divine")}><SelectTrigger className="h-11 w-full rounded-l-none border-l-0 bg-background/60 data-[size=default]:h-11"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="divine">Divine</SelectItem><SelectItem value="chaos">Chaos</SelectItem></SelectContent></Select></div></div><div className="space-y-2"><Label>Market</Label><div className="flex h-11 items-center gap-2 rounded-lg border border-input bg-background/60 px-3 text-sm"><CircleDollarSign className="size-4 text-primary" /><span className="truncate">{league}</span></div></div></div>
             <div className="space-y-2"><Label>What matters most?</Label><ToggleGroup type="single" variant="outline" value={goal} onValueChange={(value) => value && setGoal(value as OptimizationGoal)} className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">{(["dps", "balanced", "survivability"] as const).map((value) => { const Icon = value === "dps" ? Sword : value === "balanced" ? Scale : Shield; return <ToggleGroupItem key={value} value={value} className="h-20 flex-col gap-1 rounded-xl data-[state=on]:border-primary data-[state=on]:bg-primary/10 data-[state=on]:text-primary"><Icon className="size-5" /><span className="text-xs font-semibold">{value === "dps" ? "More damage" : value === "balanced" ? "A good balance" : "More defense"}</span><span className="text-[10px] font-normal text-muted-foreground">{value === "dps" ? "Offense first" : value === "balanced" ? "Damage and defense" : "Survival first"}</span></ToggleGroupItem>; })}</ToggleGroup></div>
             <div className="space-y-3"><div className="flex items-center justify-between"><Label>Gear you&apos;re open to replacing</Label><Badge variant="outline">{slots.length} selected</Badge></div><div className="grid grid-cols-2 gap-2">{EQUIPMENT_SLOTS.map((slot) => <Label key={slot} className={cn("flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-background/30 p-3 text-xs font-normal transition-colors hover:bg-accent", slots.includes(slot) && "border-primary/35 bg-primary/5")}><Checkbox checked={slots.includes(slot)} onCheckedChange={() => toggleSlot(slot)} />{slotLabels[slot]}</Label>)}</div></div>
             <Separator />
@@ -310,9 +427,9 @@ export default function OptimizerDashboard() {
             <div className="space-y-4">
               <div>
                 <h3 className="font-heading text-xl font-semibold">Search PoE Trade</h3>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">We&apos;ve turned your build and goal into PoB-style Weighted Sum filters. Pick a slot, copy its recipe, then add those weights to a <span className="text-foreground">Weighted Sum</span> group on the trade site.</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">We&apos;ve turned your build and goal into PoB-style Weighted Sum filters. Open a ready-made search immediately, or tune the multipliers before you go.</p>
               </div>
-              <Alert className="border-primary/20 bg-primary/5"><LockKeyhole className="text-primary" /><AlertTitle>A quick note about the trade link</AlertTitle><AlertDescription>PoE creates a search link only after the form is submitted. We copy the weighted recipe and open the right league for you, but you&apos;ll enter the weights and submit the search yourself.</AlertDescription></Alert>
+              <Alert className="border-primary/20 bg-primary/5"><Sparkles className="text-primary" /><AlertTitle>The weights now travel with the link</AlertTitle><AlertDescription>Each button creates a unique PoE Trade URL containing the complete weighted query. It opens the correct league with the stat group, multipliers, category, budget, and sorting already filled in.</AlertDescription></Alert>
               <div className="grid gap-2 sm:grid-cols-2">
                 {slots.map((slot) => {
                   const currentItem = build.equipment[slot];
@@ -323,11 +440,26 @@ export default function OptimizerDashboard() {
                       {weightedSearch.options.slice(0, 4).map((option) => <div key={option.id} className="flex items-start justify-between gap-3 text-[10px]"><span className="min-w-0 leading-4 text-muted-foreground">{option.label}</span><span className="shrink-0 font-mono text-primary">×{option.weight}</span></div>)}
                       {weightedSearch.options.length > 4 && <p className="font-mono text-[9px] text-muted-foreground">+ {weightedSearch.options.length - 4} more weighted stats</p>}
                     </div>}
-                    <Button variant="outline" size="sm" asChild className="w-full"><a href={createTradeSiteUrl(league)} target="_blank" rel="noopener noreferrer" onClick={() => void copyWeightedTrade(slot)}>{copiedWeightedSlot === slot ? <Check /> : <Copy />}{copiedWeightedSlot === slot ? "Copied — trade opened" : "Copy weights & open trade"}<ExternalLink /></a></Button>
+                    {weightedSearch && <>
+                      <Button size="sm" asChild className="w-full"><a href={createEncodedTradeSearchUrl(league, weightedSearch.request)} target="_blank" rel="noopener noreferrer">Open weighted search<ExternalLink /></a></Button>
+                      <div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={() => setWeightEditorSlot((current) => current === slot ? null : slot)}><SlidersHorizontal />{weightEditorSlot === slot ? "Close editor" : "Tune weights"}</Button><Button variant="outline" size="sm" onClick={() => void copyWeightedTrade(slot)}>{copiedWeightedSlot === slot ? <Check /> : <Copy />}{copiedWeightedSlot === slot ? "Link copied" : "Copy link"}</Button></div>
+                    </>}
                   </Card>;
                 })}
+                {weightEditorSlot && weightedSearches[weightEditorSlot] && <WeightedSearchEditor
+                  slot={weightEditorSlot}
+                  draft={weightedSearches[weightEditorSlot]}
+                  league={league}
+                  copied={copiedWeightedSlot === weightEditorSlot}
+                  onWeightChange={(id, weight) => updateWeightedWeight(weightEditorSlot, id, weight)}
+                  onToggle={(id, enabled) => toggleWeightedOption(weightEditorSlot, id, enabled)}
+                  onMinimumChange={(minimum) => updateWeightedMinimum(weightEditorSlot, minimum)}
+                  onReset={() => resetWeightedSearch(weightEditorSlot)}
+                  onCopy={() => void copyWeightedTrade(weightEditorSlot)}
+                  onDone={() => setWeightEditorSlot(null)}
+                />}
               </div>
-              {weightedSearchError && <Alert variant="destructive"><AlertTitle>Weights not copied</AlertTitle><AlertDescription>{weightedSearchError}</AlertDescription></Alert>}
+              {weightedSearchError && <Alert variant="destructive"><AlertTitle>Link not copied</AlertTitle><AlertDescription>{weightedSearchError}</AlertDescription></Alert>}
             </div>
 
             <div className="space-y-4">

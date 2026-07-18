@@ -30,6 +30,11 @@ export interface WeightedTradeSearchDraft {
   };
 }
 
+export interface WeightedTradeSearchCustomization {
+  weights?: Record<string, number>;
+  minimumScore?: number;
+}
+
 const rounded = (value: number) => Math.max(0.01, Number(value.toFixed(2)));
 
 function buildProfile(build: Build): WeightedTradeSearchDraft["profile"] {
@@ -136,6 +141,42 @@ export function createWeightedTradeSearch(build: Build, slot: EquipmentSlot, goa
         },
       },
       sort: { "statgroup.0": "desc" },
+    },
+  };
+}
+
+export function customizeWeightedTradeSearch(
+  draft: WeightedTradeSearchDraft,
+  customization?: WeightedTradeSearchCustomization,
+): WeightedTradeSearchDraft {
+  if (!customization) return draft;
+
+  const options = draft.options.map((option) => {
+    const customWeight = customization.weights?.[option.id];
+    if (customWeight === undefined || !Number.isFinite(customWeight)) return option;
+    return { ...option, weight: Number(customWeight.toFixed(5)) };
+  });
+  const currentStatGroup = draft.request.query.stats[0];
+  const customMinimum = customization.minimumScore;
+  const minimumScore = customMinimum !== undefined && Number.isFinite(customMinimum)
+    ? Number(customMinimum.toFixed(5))
+    : currentStatGroup.value.min;
+
+  return {
+    ...draft,
+    options,
+    request: {
+      ...draft.request,
+      query: {
+        ...draft.request.query,
+        stats: [{
+          ...currentStatGroup,
+          filters: options
+            .filter((option) => option.weight !== 0)
+            .map(({ id, weight }) => ({ id, value: { weight } })),
+          value: { min: minimumScore },
+        }],
+      },
     },
   };
 }
