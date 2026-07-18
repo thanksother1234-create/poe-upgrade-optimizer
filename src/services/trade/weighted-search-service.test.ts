@@ -45,6 +45,16 @@ describe("weighted trade search", () => {
     expect(offhand.options.some((option) => option.id.includes("resistance"))).toBe(false);
   });
 
+  it("uses the selected archetype to choose compatible starting stats", () => {
+    const build = structuredClone(mockBuild);
+    build.equipment.ring1.itemClass = "Rings";
+    build.equipment.ring1.rawText = "Rarity: RARE\nCurrent Ring\nAmethyst Ring\nImplicits: 0\n+40 to Strength";
+    const draft = createWeightedTradeSearch(build, "ring1", "balanced", { amount: 5, currency: "divine" }, "strength-stacker");
+    expect(draft.resolvedPreset).toBe("strength-stacker");
+    expect(draft.options.some((option) => option.id === "pseudo.pseudo_total_strength")).toBe(true);
+    expect(draft.request.query.stats[0].value.min).toBeGreaterThan(1);
+  });
+
   it("formats both readable weights and query JSON for copying", () => {
     const draft = createWeightedTradeSearch(structuredClone(mockBuild), "weapon", "dps", { amount: 5, currency: "divine" });
     const text = formatWeightedSearchRecipe(draft, "Mirage");
@@ -53,19 +63,20 @@ describe("weighted trade search", () => {
     expect(text).toContain('"type": "weight"');
   });
 
-  it("applies user weights and minimum score without mutating the generated draft", () => {
+  it("applies user weights, added stats, and a read-only dynamic minimum without mutating the draft", () => {
     const draft = createWeightedTradeSearch(structuredClone(mockBuild), "boots", "balanced", { amount: 5, currency: "divine" });
     const first = draft.options[0];
     const second = draft.options[1];
     const customized = customizeWeightedTradeSearch(draft, {
       weights: { [first.id]: -2.5, [second.id]: 0 },
-      minimumScore: 12.75,
+      addedOptions: [{ id: "pseudo.pseudo_total_strength", label: "+# total to Strength", reason: "Manual stat", weight: 2, currentValue: 20, source: "manual" }],
     });
 
     expect(customized.options[0].weight).toBe(-2.5);
     expect(customized.request.query.stats[0].filters).toContainEqual({ id: first.id, value: { weight: -2.5 } });
+    expect(customized.request.query.stats[0].filters).toContainEqual({ id: "pseudo.pseudo_total_strength", value: { weight: 2 } });
     expect(customized.request.query.stats[0].filters.some((filter) => filter.id === second.id)).toBe(false);
-    expect(customized.request.query.stats[0].value.min).toBe(12.75);
+    expect(customized.request.query.stats[0].value.min).toBe(40);
     expect(draft.options[0].weight).toBe(first.weight);
   });
 });

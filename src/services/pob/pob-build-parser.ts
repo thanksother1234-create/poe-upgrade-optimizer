@@ -57,7 +57,7 @@ function parseItems(xml: string): Map<string, Item> {
     const displayLines = rarity === "normal" ? lines.slice(displayStart, displayStart + 1) : lines.slice(displayStart, displayStart + 2);
     const name = displayLines[0] ?? "Unknown Item";
     const baseType = displayLines[1] ?? displayLines[0] ?? "Unknown Base";
-    items.set(id, { id: `pob-item-${id}`, name, baseType, itemClass, rarity, modifiers: parseModifiers(lines) });
+    items.set(id, { id: `pob-item-${id}`, name, baseType, itemClass, rarity, modifiers: parseModifiers(lines), rawText: rawText.trim() });
   }
   return items;
 }
