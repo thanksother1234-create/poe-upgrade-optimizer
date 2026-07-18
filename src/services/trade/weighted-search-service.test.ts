@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mockBuild } from "@/mocks/build";
-import { createWeightedTradeSearch, formatWeightedSearchRecipe } from "./weighted-search-service";
+import { createWeightedTradeSearch, customizeWeightedTradeSearch, formatWeightedSearchRecipe } from "./weighted-search-service";
 
 describe("weighted trade search", () => {
   it("creates an official weighted-sum request with category and budget filters", () => {
@@ -28,5 +28,21 @@ describe("weighted trade search", () => {
     expect(text).toContain("Stat group: Weighted Sum");
     expect(text).toContain("Generated query JSON:");
     expect(text).toContain('"type": "weight"');
+  });
+
+  it("applies user weights and minimum score without mutating the generated draft", () => {
+    const draft = createWeightedTradeSearch(structuredClone(mockBuild), "boots", "balanced", { amount: 5, currency: "divine" });
+    const first = draft.options[0];
+    const second = draft.options[1];
+    const customized = customizeWeightedTradeSearch(draft, {
+      weights: { [first.id]: -2.5, [second.id]: 0 },
+      minimumScore: 12.75,
+    });
+
+    expect(customized.options[0].weight).toBe(-2.5);
+    expect(customized.request.query.stats[0].filters).toContainEqual({ id: first.id, value: { weight: -2.5 } });
+    expect(customized.request.query.stats[0].filters.some((filter) => filter.id === second.id)).toBe(false);
+    expect(customized.request.query.stats[0].value.min).toBe(12.75);
+    expect(draft.options[0].weight).toBe(first.weight);
   });
 });
