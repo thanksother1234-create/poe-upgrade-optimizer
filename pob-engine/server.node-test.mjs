@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPobEngineServer, replaceItemsInBuildXml } from "./server.mjs";
+import { createPobEngineServer, parseEngineOutput, replaceItemsInBuildXml } from "./server.mjs";
 
 const buildXml = `<PathOfBuilding><Items activeItemSet="2"><Item id="4">Rarity: RARE\nOld Ring\nRuby Ring</Item><ItemSet id="1"><Slot name="Ring 1" itemId="0"/></ItemSet><ItemSet id="2"><Slot itemId="4" name="Ring 1"/></ItemSet></Items></PathOfBuilding>`;
 
@@ -19,6 +19,22 @@ test("supports multiple replacements in one scenario", () => {
   ]);
   assert.match(replaced, /<Slot itemId="5" name="Ring 1"\/>/);
   assert.match(replaced, /<Slot name="Belt" itemId="6"\/>/);
+});
+
+test("parses metrics after Path of Building log prefixes and reports a missing candidate", () => {
+  const metricValues = Array.from({ length: 14 }, (_, index) => String(index + 1)).join("\t");
+  const output = `PoB startup log\n\u001b[32mworker: POE_METRICS\t0\t${metricValues}\u001b[0m\n`;
+  const parsed = parseEngineOutput(output, ["candidate-1"]);
+  assert.equal(parsed.baseline.totalDps, 1);
+  assert.equal(parsed.baseline.chaosResistance, 14);
+  assert.deepEqual(parsed.results, [{ id: "candidate-1", error: "Path of Building did not return metrics for this candidate." }]);
+});
+
+test("includes worker diagnostics when no baseline marker is returned", () => {
+  assert.throws(
+    () => parseEngineOutput("initialising", [], "Lua worker failed"),
+    /Worker output: Lua worker failed \| initialising/,
+  );
 });
 
 async function withServer(options, callback) {

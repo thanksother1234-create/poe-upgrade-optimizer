@@ -103,11 +103,23 @@ async function readJsonBody(request) {
   }
 }
 
-function parseEngineOutput(stdout, scenarioIds) {
+const stripAnsi = (value) => value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+const compactDiagnostic = (stdout, stderr) => stripAnsi(`${stderr ?? ""}\n${stdout ?? ""}`)
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter(Boolean)
+  .slice(-8)
+  .join(" | ")
+  .slice(0, 1_000);
+
+export function parseEngineOutput(stdout, scenarioIds, stderr = "") {
   const metricsByIndex = new Map();
   const errorsByIndex = new Map();
-  for (const line of stdout.split(/\r?\n/)) {
-    const fields = line.split("\t");
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const cleanLine = stripAnsi(rawLine);
+    const markerIndex = Math.max(cleanLine.indexOf("POE_METRICS\t"), cleanLine.indexOf("POE_ERROR\t"));
+    if (markerIndex < 0) continue;
+    const fields = cleanLine.slice(markerIndex).split("\t");
     if (fields[0] === "POE_ERROR") errorsByIndex.set(Number(fields[1]), fields.slice(2).join("\t"));
     if (fields[0] !== "POE_METRICS") continue;
     const index = Number(fields[1]);
@@ -117,10 +129,15 @@ function parseEngineOutput(stdout, scenarioIds) {
   }
   if (errorsByIndex.has(0)) throw new Error(`Baseline build failed: ${errorsByIndex.get(0)}`);
   const baseline = metricsByIndex.get(0);
-  if (!baseline) throw new Error("Path of Building did not return baseline metrics.");
+  if (!baseline) {
+    const diagnostic = compactDiagnostic(stdout, stderr);
+    throw new Error(`Path of Building did not return baseline metrics.${diagnostic ? ` Worker output: ${diagnostic}` : " The worker produced no output."}`);
+  }
   const results = scenarioIds.map((id, index) => errorsByIndex.has(index + 1)
     ? { id, error: errorsByIndex.get(index + 1) }
-    : { id, metrics: metricsByIndex.get(index + 1) });
+    : metricsByIndex.has(index + 1)
+      ? { id, metrics: metricsByIndex.get(index + 1) }
+      : { id, error: "Path of Building did not return metrics for this candidate." });
   return { baseline, results };
 }
 
@@ -146,13 +163,13 @@ export async function evaluateScenarios({ buildXml, scenarios }) {
     const pobRoot = dirname(pobSource);
     const engineEnvironment = { ...process.env };
     delete engineEnvironment.CI;
-    const { stdout } = await execFileAsync(process.env.LUAJIT_PATH ?? "luajit", [worker, ...files], {
+    const { stdout, stderr } = await execFileAsync(process.env.LUAJIT_PATH ?? "luajit", [worker, ...files], {
       cwd: pobSource,
       env: { ...engineEnvironment, LUA_PATH: `${join(pobRoot, "runtime/lua/?.lua")};${join(pobRoot, "runtime/lua/?/init.lua")};;` },
       maxBuffer: 4 * 1024 * 1024,
       timeout: 100_000,
     });
-    return parseEngineOutput(stdout, scenarios.map((scenario) => scenario.id));
+    return parseEngineOutput(stdout, scenarios.map((scenario) => scenario.id), stderr);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
