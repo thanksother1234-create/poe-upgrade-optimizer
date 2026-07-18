@@ -52,6 +52,64 @@ export function normalizePoeUserAgent(value?: string) {
   return /^OAuth\s+/i.test(userAgent) ? userAgent : `OAuth ${userAgent}`;
 }
 
+function hasContactEmail(userAgent: string) {
+  return /^OAuth\s+\S+\/\S+\s+\(contact:\s*[^\s@()]+@[^\s@()]+\.[^\s@()]+\)$/i.test(userAgent);
+}
+
+async function forbiddenTradeError(response: Response, userAgent: string, operation: "search" | "listing fetch") {
+  let body = "";
+  try {
+    body = await response.clone().text();
+  } catch {
+    // The status and headers still provide useful diagnostics when the body cannot be read.
+  }
+
+  const server = response.headers.get("server") ?? "";
+  const contentType = response.headers.get("content-type") ?? "";
+  const cfRay = response.headers.get("cf-ray");
+  const hasRateHeaders = Boolean(
+    response.headers.get("retry-after")
+    || response.headers.get("x-rate-limit-policy")
+    || response.headers.get("x-rate-limit-rules")
+    || response.headers.get("x-rate-limit-ip-state"),
+  );
+  const edgeBlock = Boolean(cfRay)
+    || /cloudflare/i.test(server)
+    || /cloudflare|attention required|error\s*1020|access denied/i.test(body);
+  const apiDenial = contentType.toLowerCase().includes("application/json")
+    || /^\s*[{[]/.test(body);
+  const validIdentityShape = hasContactEmail(userAgent);
+
+  console.warn("[poe-trade] upstream request rejected", {
+    operation,
+    status: response.status,
+    rejection: edgeBlock ? "edge-block" : hasRateHeaders ? "rate-policy" : apiDenial ? "api-forbidden" : "unknown-forbidden",
+    server: server || undefined,
+    contentType: contentType || undefined,
+    cfRay: cfRay || undefined,
+    hasRateHeaders,
+    userAgent: {
+      oauthPrefix: /^OAuth\s+/i.test(userAgent),
+      contactEmail: validIdentityShape,
+      length: userAgent.length,
+    },
+  });
+
+  if (!validIdentityShape) {
+    return new LiveTradeError("POE_USER_AGENT is not in the required format. Set it to OAuth AppName/Version (contact: real-email@example.com), then redeploy.", 502);
+  }
+  if (edgeBlock) {
+    return new LiveTradeError("Path of Exile blocked the request from Vercel's hosting network (diagnostic: edge-block). Your POE_USER_AGENT format is valid; changing the email again will not fix this.", 502);
+  }
+  if (hasRateHeaders) {
+    return new LiveTradeError("Path of Exile rejected the request under its rate or abuse policy (diagnostic: rate-policy). Stop retries for at least 10 minutes before trying again.", 502);
+  }
+  if (apiDenial) {
+    return new LiveTradeError("Path of Exile returned an API authorization denial to the hosted trade client (diagnostic: api-forbidden). Your POE_USER_AGENT format is valid.", 502);
+  }
+  return new LiveTradeError("Path of Exile rejected the hosted trade request (diagnostic: unknown-forbidden). Check the Vercel function log for '[poe-trade] upstream request rejected'.", 502);
+}
+
 function parseModifier(modifier: TradeModifier): string | null {
   if (typeof modifier === "string") return modifier;
   return typeof modifier.description === "string" ? modifier.description : null;
@@ -156,7 +214,7 @@ export class LiveTradeMarketService implements TradeMarketService {
       cache: "no-store",
     });
     if (searchResponse.status === 429) throw new LiveTradeError("The Path of Exile trade API rate limit was reached. Wait a moment and try again.", 429);
-    if (searchResponse.status === 403) throw new LiveTradeError("Path of Exile rejected the trade search identity. Verify that POE_USER_AGENT contains a real contact email and redeploy the app.", 502);
+    if (searchResponse.status === 403) throw await forbiddenTradeError(searchResponse, this.userAgent, "search");
     if (!searchResponse.ok) throw new LiveTradeError(`Path of Exile trade search returned ${searchResponse.status}.`);
 
     const searchPayload = await searchResponse.json() as TradeSearchResponse;
@@ -169,6 +227,7 @@ export class LiveTradeMarketService implements TradeMarketService {
       cache: "no-store",
     });
     if (fetchResponse.status === 429) throw new LiveTradeError("The Path of Exile trade API rate limit was reached. Wait a moment and try again.", 429);
+    if (fetchResponse.status === 403) throw await forbiddenTradeError(fetchResponse, this.userAgent, "listing fetch");
     if (!fetchResponse.ok) throw new LiveTradeError(`Path of Exile trade listing fetch returned ${fetchResponse.status}.`);
 
     const fetchPayload = await fetchResponse.json() as TradeFetchResponse;
