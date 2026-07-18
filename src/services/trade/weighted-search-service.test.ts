@@ -12,6 +12,16 @@ describe("weighted trade search", () => {
     expect(draft.request.sort).toEqual({ "statgroup.0": "desc" });
   });
 
+  it("applies the equipped item class as the PoE trade category", () => {
+    const shield = createWeightedTradeSearch(structuredClone(mockBuild), "offhand", "balanced", { amount: 5, currency: "divine" });
+    expect(shield.request.query.filters.type_filters?.filters.category.option).toBe("armour.shield");
+
+    const swordBuild = structuredClone(mockBuild);
+    swordBuild.equipment.weapon.itemClass = "One Hand Swords";
+    const sword = createWeightedTradeSearch(swordBuild, "weapon", "dps", { amount: 5, currency: "divine" });
+    expect(sword.request.query.filters.type_filters?.filters.category.option).toBe("weapon.onesword");
+  });
+
   it("adapts resistance weights to the imported build", () => {
     const build = structuredClone(mockBuild);
     build.metrics.fireResistance = 75;

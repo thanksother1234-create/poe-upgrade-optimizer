@@ -27,4 +27,10 @@ describe("trade categories", () => {
   it("keeps legacy greatsword builds compatible when item class is absent", () => {
     expect(getTradeCategory("weapon", item("", "Engraved Greatsword"))).toBe("weapon.twosword");
   });
+
+  it("recognizes singular item classes and infers common offhands when the class is absent", () => {
+    expect(getTradeCategory("weapon", item("One Hand Sword"))).toBe("weapon.onesword");
+    expect(getTradeCategory("offhand", item("", "Titanium Spirit Shield"))).toBe("armour.shield");
+    expect(getTradeCategory("offhand", item("", "Spike-Point Arrow Quiver"))).toBe("accessory.quiver");
+  });
 });
