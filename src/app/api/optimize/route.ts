@@ -3,7 +3,7 @@ import { CurrencyAmount, EQUIPMENT_SLOTS, EquipmentSlot, OptimizationGoal } from
 import { UpgradeOptimizer } from "@/services/optimizer/upgrade-optimizer";
 import { ExactPobCalculationService, PobEngineError } from "@/services/pob/exact-pob-calculation-service";
 import { parsePobXml } from "@/services/pob/pob-build-parser";
-import { LiveTradeError, LiveTradeMarketService } from "@/services/trade/live-trade-market-service";
+import { isManualCandidateCompatible, ManualTradeMarketService, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
 
 export const maxDuration = 120;
 
@@ -19,6 +19,7 @@ function optimizationInput(value: unknown) {
   const goal = body.goal as OptimizationGoal;
   const budget = body.budget as Partial<CurrencyAmount> | undefined;
   const allowedSlots = Array.isArray(body.allowedSlots) ? [...new Set(body.allowedSlots)] : [];
+  const candidateInputs = Array.isArray(body.candidates) ? body.candidates : [];
 
   if (!buildXml.includes("<PathOfBuilding") || buildXml.length > 3 * 1024 * 1024) throw new PobEngineError("Re-import a valid Path of Building export before optimizing.", 400);
   if (!leagueNamePattern.test(league)) throw new PobEngineError("Select a valid Path of Exile league.", 400);
@@ -29,6 +30,7 @@ function optimizationInput(value: unknown) {
   if (!allowedSlots.length || allowedSlots.some((slot) => typeof slot !== "string" || !slots.has(slot as EquipmentSlot))) {
     throw new PobEngineError("Select at least one valid equipment slot.", 400);
   }
+  if (!candidateInputs.length || candidateInputs.length > 20) throw new PobEngineError("Paste between 1 and 20 trade candidates before running the optimizer.", 400);
 
   let build: ReturnType<typeof parsePobXml>;
   try {
@@ -37,27 +39,51 @@ function optimizationInput(value: unknown) {
     throw new PobEngineError("The supplied Path of Building XML could not be parsed. Re-import the build and try again.", 400);
   }
 
+  const candidates = candidateInputs.map((value, index) => {
+    if (!value || typeof value !== "object") throw new PobEngineError(`Candidate ${index + 1} is invalid.`, 400);
+    const candidate = value as Record<string, unknown>;
+    const slot = candidate.slot as EquipmentSlot;
+    const price = candidate.price as Partial<CurrencyAmount> | undefined;
+    if (!slots.has(slot) || !allowedSlots.includes(slot)) throw new PobEngineError(`Candidate ${index + 1} uses a slot that is not selected.`, 400);
+    if (!price || !Number.isFinite(price.amount) || Number(price.amount) <= 0 || !["chaos", "divine"].includes(String(price.currency))) {
+      throw new PobEngineError(`Candidate ${index + 1} needs a valid chaos or divine price.`, 400);
+    }
+    try {
+      const item = parseCopiedTradeItem({
+        id: `manual-${index + 1}`,
+        slot,
+        rawText: typeof candidate.rawText === "string" ? candidate.rawText : "",
+        price: { amount: Number(price.amount), currency: price.currency as CurrencyAmount["currency"] },
+        league,
+      });
+      if (!isManualCandidateCompatible(build, item)) throw new Error(`${item.name} is not compatible with ${slot}.`);
+      return item;
+    } catch (error) {
+      throw new PobEngineError(error instanceof Error ? `Candidate ${index + 1}: ${error.message}` : `Candidate ${index + 1} could not be parsed.`, 400);
+    }
+  });
+
   return {
     build,
     budget: { amount: Number(budget.amount), currency: budget.currency as CurrencyAmount["currency"] },
     goal,
     allowedSlots: allowedSlots as EquipmentSlot[],
     league,
+    candidates,
   };
 }
 
 export async function POST(request: Request) {
   try {
     const input = optimizationInput(await request.json());
-    const itemsPerSlot = Math.max(1, Math.min(5, Math.floor(20 / input.allowedSlots.length)));
     const optimizer = new UpgradeOptimizer(
       new ExactPobCalculationService(),
-      new LiveTradeMarketService(process.env.POE_USER_AGENT, itemsPerSlot),
+      new ManualTradeMarketService(input.candidates),
     );
     const result = await optimizer.optimize({ ...input, requireVerified: true });
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof PobEngineError || error instanceof LiveTradeError) {
+    if (error instanceof PobEngineError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return NextResponse.json({ error: "The optimizer could not complete the live Path of Building evaluation." }, { status: 500 });

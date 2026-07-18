@@ -70,7 +70,7 @@ export class ExactPobCalculationService implements PobCalculationService {
 
   async simulateItemReplacements(build: Build, items: TradeItem[]): Promise<PobBatchSimulationResult> {
     const scenarios = items.map((item, index) => {
-      if (!item.rawText) throw new PobEngineError(`The live listing for ${item.name} did not include Path of Building item text.`);
+      if (!item.rawText) throw new PobEngineError(`The candidate ${item.name} did not include copied Path of Building item text.`);
       return { id: `${index}:${item.slot}:${item.id}`, replacements: [{ slot: item.slot, rawText: item.rawText }] };
     });
     const response = await this.evaluate(build, scenarios);

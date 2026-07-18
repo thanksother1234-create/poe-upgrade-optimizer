@@ -45,7 +45,7 @@ test("reports whether the hosted engine is configured", async () => {
       ok: true,
       engineVersion: "v2.65.0",
       status: "ready",
-      endpoints: { health: "GET /health", evaluate: "POST /evaluate", tradeListings: "POST /trade/listings" },
+      endpoints: { health: "GET /health", evaluate: "POST /evaluate" },
     });
 
     const health = await fetch(`${baseUrl}/health`);
@@ -73,57 +73,5 @@ test("rejects evaluation requests with the wrong bearer token", async () => {
       body: "{}",
     });
     assert.equal(evaluation.status, 401);
-  });
-});
-
-test("proxies authenticated trade requests with pacing-safe shared caching", async () => {
-  const upstreamCalls = [];
-  const rawText = "Item Class: Rings\nRarity: RARE\nTest Ring\nAmethyst Ring";
-  const fetchImpl = async (url, init = {}) => {
-    upstreamCalls.push({ url: String(url), init });
-    assert.equal(new Headers(init.headers).get("user-agent"), "OAuth TestAgent/1.0 (contact: owner@example.com)");
-    if (init.method === "POST") return Response.json({ id: "query-123", result: ["listing-123"] });
-    return Response.json({
-      result: [{
-        id: "listing-123",
-        listing: { price: { amount: 1, currency: "divine" } },
-        item: { name: "Test Ring", typeLine: "Amethyst Ring", icon: "https://web.poecdn.com/item.png", extended: { text: Buffer.from(rawText).toString("base64") } },
-      }],
-    });
-  };
-
-  await withServer({ engineToken: "space-secret", fetchImpl, tradeSearchIntervalMs: 0, tradeFetchIntervalMs: 0 }, async (baseUrl) => {
-    const payload = {
-      league: "Mirage",
-      limit: 10,
-      userAgent: "OAuth TestAgent/1.0 (contact: owner@example.com)",
-      query: { query: { status: { option: "online" } }, sort: { price: "desc" } },
-    };
-    const request = () => fetch(`${baseUrl}/trade/listings`, {
-      method: "POST",
-      headers: { Authorization: "Bearer space-secret", "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const first = await request();
-    assert.equal(first.status, 200);
-    assert.deepEqual(await first.json(), {
-      engineVersion: "v2.65.0",
-      queryId: "query-123",
-      result: [{
-        id: "listing-123",
-        listing: { price: { amount: 1, currency: "divine" } },
-        item: { name: "Test Ring", typeLine: "Amethyst Ring", icon: "https://web.poecdn.com/item.png", extended: { text: Buffer.from(rawText).toString("base64") } },
-      }],
-    });
-    const cached = await request();
-    assert.equal(cached.status, 200);
-    assert.equal(upstreamCalls.length, 2);
-  });
-});
-
-test("does not expose the trade gateway without the engine bearer token", async () => {
-  await withServer({ engineToken: "space-secret", tradeSearchIntervalMs: 0, tradeFetchIntervalMs: 0 }, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/trade/listings`, { method: "POST", body: "{}" });
-    assert.equal(response.status, 401);
   });
 });

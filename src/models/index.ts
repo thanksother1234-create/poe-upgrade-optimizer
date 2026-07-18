@@ -13,7 +13,7 @@ export type ItemRarity = "normal" | "magic" | "rare" | "unique";
 export interface Item { id: string; name: string; baseType: string; itemClass?: string; rarity: ItemRarity; modifiers: ItemModifier[] }
 export interface TradeItem extends Item {
   slot: EquipmentSlot;
-  imageUrl: string;
+  imageUrl?: string;
   price: CurrencyAmount;
   rawText?: string;
   tradeUrl?: string;

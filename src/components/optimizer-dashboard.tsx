@@ -3,14 +3,16 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity, ArrowRight, CheckCircle2, CircleDollarSign, DatabaseZap, Gauge,
-  ExternalLink, HeartPulse, Import, Loader2, LockKeyhole, PackageSearch, Scale, Shield,
-  Sparkles, Sword, WandSparkles, Wifi, WifiOff, Zap,
+  Activity, ArrowRight, CheckCircle2, CircleDollarSign, ClipboardPaste, DatabaseZap, Gauge,
+  ExternalLink, HeartPulse, Import, Loader2, LockKeyhole, PackageSearch, Scale, Search, Shield,
+  Sparkles, Sword, Trash2, WandSparkles, Wifi, WifiOff, Zap,
 } from "lucide-react";
-import { Build, EQUIPMENT_SLOTS, EquipmentSlot, LeagueResponse, OptimizationGoal, OptimizationResult, PoeLeague, UpgradeRecommendation } from "@/models";
+import { Build, CurrencyAmount, EQUIPMENT_SLOTS, EquipmentSlot, LeagueResponse, OptimizationGoal, OptimizationResult, PoeLeague, TradeItem, UpgradeRecommendation } from "@/models";
 import { MvpPobCalculationService } from "@/services/pob/pob-calculation-service";
 import { isPermanentLeague } from "@/services/league/league-service";
 import { formatNumber, formatPrice, percentChange } from "@/lib/metrics";
+import { isManualCandidateCompatible, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
+import { createTradeSiteUrl } from "@/services/trade/trade-search-service";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -28,8 +30,17 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 const pobService = new MvpPobCalculationService();
 const slotLabels: Record<EquipmentSlot, string> = { weapon: "Weapon", offhand: "Offhand", helmet: "Helmet", bodyArmour: "Body Armour", gloves: "Gloves", boots: "Boots", amulet: "Amulet", ring1: "Ring 1", ring2: "Ring 2", belt: "Belt" };
+const fixedTradeClassLabels: Partial<Record<EquipmentSlot, string>> = { helmet: "Helmets", bodyArmour: "Body Armours", gloves: "Gloves", boots: "Boots", amulet: "Amulets", ring1: "Rings", ring2: "Rings", belt: "Belts" };
 const defaultSlots: EquipmentSlot[] = ["weapon", "boots", "amulet", "ring1", "ring2"];
 const fallbackLeague: PoeLeague = { id: "Standard", name: "Standard", realm: "pc", startAt: "2013-01-23T21:00:00Z", endAt: null };
+
+interface ManualCandidate {
+  id: string;
+  slot: EquipmentSlot;
+  rawText: string;
+  price: CurrencyAmount;
+  item: TradeItem;
+}
 
 function SectionHeading({ number, eyebrow, title, icon: Icon }: { number: string; eyebrow: string; title: string; icon: typeof Activity }) {
   return <div className="flex items-center gap-3">
@@ -65,7 +76,9 @@ function ItemPreview({ recommendation }: { recommendation: UpgradeRecommendation
     <Tooltip>
       <TooltipTrigger asChild>
         <button type="button" className="group grid h-20 w-16 place-items-center rounded-md border border-primary/20 bg-background/65 p-1 outline-none transition-colors hover:border-primary/60 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30" aria-label={`View all stats for ${recommendation.item.name}`}>
-          <Image src={recommendation.item.imageUrl} alt={`${recommendation.item.baseType} inventory artwork`} width={64} height={80} className="max-h-[4.5rem] w-auto object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] transition-transform group-hover:scale-105" />
+          {recommendation.item.imageUrl
+            ? <Image src={recommendation.item.imageUrl} alt={`${recommendation.item.baseType} inventory artwork`} width={64} height={80} className="max-h-[4.5rem] w-auto object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] transition-transform group-hover:scale-105" />
+            : <PackageSearch className="size-7 text-primary/70 transition-transform group-hover:scale-105" />}
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" sideOffset={10} className="block w-80 max-w-[calc(100vw-2rem)] items-stretch gap-0 overflow-hidden border border-amber-500/35 bg-[#0b0a08] p-0 text-foreground shadow-2xl">
@@ -96,7 +109,7 @@ function RecommendationCard({ recommendation, baseline, rank, league }: { recomm
     </CardHeader>
     <CardContent className="space-y-4 p-5">
       <div className="grid grid-cols-4 divide-x divide-border rounded-md border border-border bg-background/40">{[["DPS", <Delta key="dps" value={dps} />], ["EHP", <Delta key="ehp" value={ehp} />], ["PHYS", <Delta key="phys" value={percentChange(baseline.physicalMaxHit, recommendation.changes.physicalMaxHit)} />], ["SCORE", <span key="score" className="font-mono font-semibold">{recommendation.score.toFixed(1)}</span>]].map(([label, value]) => <div key={label as string} className="space-y-1 px-3 py-2"><p className="font-mono text-[9px] text-muted-foreground">{label}</p>{value}</div>)}</div>
-      <div className="flex items-center justify-between gap-3"><p className="text-[10px] text-muted-foreground">Live {recommendation.item.baseType} listing in {league}, verified by PoB.</p><Button variant="link" size="sm" asChild className="h-auto shrink-0 px-0 text-xs"><a href={tradeHref} target="_blank" rel="noopener noreferrer" aria-label={`Open the live ${recommendation.item.name} listing on the official Path of Exile trade site`}>Open live listing<ExternalLink /></a></Button></div>
+      <div className="flex items-center justify-between gap-3"><p className="text-[10px] text-muted-foreground">Manually supplied {recommendation.item.baseType}, verified by PoB.</p><Button variant="link" size="sm" asChild className="h-auto shrink-0 px-0 text-xs"><a href={tradeHref} target="_blank" rel="noopener noreferrer" aria-label={`Open the official Path of Exile trade site for ${league}`}>Open PoE Trade<ExternalLink /></a></Button></div>
       <div className="flex flex-wrap gap-2">{recommendation.item.modifiers.slice(0, 2).map((mod) => <Badge variant="secondary" key={mod.label} className="font-normal text-muted-foreground">{mod.label}</Badge>)}</div>
       <Alert className="border-primary/20 bg-primary/5"><Sparkles className="text-primary" /><AlertTitle className="font-mono text-[10px] tracking-wider text-primary">WHY THIS UPGRADE</AlertTitle><AlertDescription>{recommendation.explanation}</AlertDescription></Alert>
     </CardContent>
@@ -120,6 +133,12 @@ export default function OptimizerDashboard() {
   const [currentLeague, setCurrentLeague] = useState("Standard");
   const [leagueLoading, setLeagueLoading] = useState(true);
   const [leagueSource, setLeagueSource] = useState<LeagueResponse["source"]>("fallback");
+  const [candidates, setCandidates] = useState<ManualCandidate[]>([]);
+  const [candidateSlot, setCandidateSlot] = useState<EquipmentSlot>(defaultSlots[0]);
+  const [candidateText, setCandidateText] = useState("");
+  const [candidatePrice, setCandidatePrice] = useState(1);
+  const [candidateCurrency, setCandidateCurrency] = useState<"chaos" | "divine">("divine");
+  const [candidateError, setCandidateError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -134,27 +153,73 @@ export default function OptimizerDashboard() {
   }, []);
 
   const leagueGroups = useMemo(() => ({ challenge: leagues.filter((item) => !isPermanentLeague(item)).length, permanent: leagues.filter(isPermanentLeague).length }), [leagues]);
-  const importBuild = async () => { try { setImporting(true); setError(""); setOptimizationError(""); setBuild(await pobService.importBuild(pobCode)); setResult(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Import failed"); } finally { setImporting(false); } };
+  const importBuild = async () => {
+    try {
+      setImporting(true); setError(""); setOptimizationError("");
+      setBuild(await pobService.importBuild(pobCode)); setResult(null); setCandidates([]); setCandidateError("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Import failed");
+    } finally { setImporting(false); }
+  };
+
+  const addCandidate = () => {
+    if (!build || !slots.length) return;
+    try {
+      setCandidateError(""); setOptimizationError(""); setResult(null);
+      if (candidates.length >= 20) throw new Error("A maximum of 20 candidates can be evaluated at once.");
+      if (!slots.includes(candidateSlot)) throw new Error("Choose one of the selected equipment slots.");
+      const id = `manual-${Date.now()}-${candidates.length + 1}`;
+      const price: CurrencyAmount = { amount: candidatePrice, currency: candidateCurrency };
+      const item = parseCopiedTradeItem({ id, slot: candidateSlot, rawText: candidateText, price, league });
+      if (!isManualCandidateCompatible(build, item)) throw new Error(`${item.name} is not compatible with ${slotLabels[candidateSlot]}.`);
+      if (candidates.some((candidate) => candidate.slot === candidateSlot && candidate.rawText === item.rawText)) throw new Error("That candidate has already been added for this slot.");
+      setCandidates((current) => [...current, { id, slot: candidateSlot, rawText: item.rawText ?? candidateText, price, item }]);
+      setCandidateText("");
+    } catch (caught) {
+      setCandidateError(caught instanceof Error ? caught.message : "The copied item could not be added.");
+    }
+  };
+
   const run = async () => {
-    if (!build?.sourceXml || !slots.length) return;
+    if (!build?.sourceXml || !slots.length || !candidates.length) return;
     try {
       setLoading(true); setOptimizationError(""); setResult(null);
       const response = await fetch("/api/optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ buildXml: build.sourceXml, budget: { amount: budget, currency }, goal, allowedSlots: slots, league }),
+        body: JSON.stringify({
+          buildXml: build.sourceXml,
+          budget: { amount: budget, currency },
+          goal,
+          allowedSlots: slots,
+          league,
+          candidates: candidates.map((candidate) => ({ slot: candidate.slot, rawText: candidate.rawText, price: candidate.price })),
+        }),
       });
       const payload = await response.json() as OptimizationResult & { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "The live optimizer could not complete this search.");
+      if (!response.ok) throw new Error(payload.error ?? "The optimizer could not evaluate the pasted candidates.");
       setResult(payload);
       setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth" }), 20);
     } catch (caught) {
-      setOptimizationError(caught instanceof Error ? caught.message : "The live optimizer could not complete this search.");
+      setOptimizationError(caught instanceof Error ? caught.message : "The optimizer could not evaluate the pasted candidates.");
     } finally {
       setLoading(false);
     }
   };
-  const toggleSlot = (slot: EquipmentSlot) => setSlots((current) => current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]);
+  const toggleSlot = (slot: EquipmentSlot) => {
+    if (slots.includes(slot) && candidates.some((candidate) => candidate.slot === slot)) {
+      setCandidateError(`Remove the ${slotLabels[slot]} candidates before deselecting that slot.`);
+      return;
+    }
+    const next = slots.includes(slot) ? slots.filter((item) => item !== slot) : [...slots, slot];
+    setSlots(next);
+    if (!next.includes(candidateSlot) && next[0]) setCandidateSlot(next[0]);
+  };
+  const removeCandidate = (id: string) => {
+    setCandidates((current) => current.filter((candidate) => candidate.id !== id));
+    setResult(null); setCandidateError("");
+  };
+  const prepareManualSearch = () => document.getElementById("manual-candidates")?.scrollIntoView({ behavior: "smooth" });
 
   return <main className="min-h-screen bg-background text-foreground">
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/90 backdrop-blur-xl">
@@ -165,8 +230,8 @@ export default function OptimizerDashboard() {
     </header>
 
     <section id="top" className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_auto] lg:items-end lg:py-20">
-      <div><Badge variant="outline" className="mb-5 font-mono tracking-widest text-primary">BUILD INTELLIGENCE / 01</Badge><h1 className="max-w-3xl font-heading text-5xl font-semibold leading-[0.95] tracking-tight sm:text-7xl">Spend smarter.<br /><span className="text-primary">Scale harder.</span></h1><p className="mt-6 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">Import your build, choose the market you play in, and rank upgrades using deterministic simulations within your budget.</p></div>
-      <Card className="min-w-72 border-primary/20 bg-primary/5 shadow-none"><CardHeader><CardDescription className="font-mono text-[10px] tracking-widest">CALCULATION MODEL</CardDescription><CardTitle className="flex items-center gap-2"><DatabaseZap className="size-5 text-primary" />Full Path of Building</CardTitle></CardHeader><CardContent className="font-mono text-[10px] tracking-wider text-muted-foreground">LIVE LISTING / ITEM REPLACEMENT / RECALCULATE</CardContent></Card>
+      <div><Badge variant="outline" className="mb-5 font-mono tracking-widest text-primary">BUILD INTELLIGENCE / 01</Badge><h1 className="max-w-3xl font-heading text-5xl font-semibold leading-[0.95] tracking-tight sm:text-7xl">Spend smarter.<br /><span className="text-primary">Scale harder.</span></h1><p className="mt-6 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">Import your build, collect candidates from the official trade site, and rank them using deterministic Path of Building simulations.</p></div>
+      <Card className="min-w-72 border-primary/20 bg-primary/5 shadow-none"><CardHeader><CardDescription className="font-mono text-[10px] tracking-widest">CALCULATION MODEL</CardDescription><CardTitle className="flex items-center gap-2"><DatabaseZap className="size-5 text-primary" />Full Path of Building</CardTitle></CardHeader><CardContent className="font-mono text-[10px] tracking-wider text-muted-foreground">MANUAL CANDIDATE / ITEM REPLACEMENT / RECALCULATE</CardContent></Card>
     </section>
 
     <section className="mx-auto max-w-7xl space-y-4 px-4 pb-12 sm:px-6">
@@ -192,19 +257,63 @@ export default function OptimizerDashboard() {
             <div className="space-y-2"><Label>Optimization goal</Label><ToggleGroup type="single" variant="outline" value={goal} onValueChange={(value) => value && setGoal(value as OptimizationGoal)} className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">{(["dps", "balanced", "survivability"] as const).map((value) => { const Icon = value === "dps" ? Sword : value === "balanced" ? Scale : Shield; return <ToggleGroupItem key={value} value={value} className="h-20 flex-col gap-1 data-[state=on]:border-primary data-[state=on]:bg-primary/10 data-[state=on]:text-primary"><Icon className="size-5" /><span className="text-xs font-semibold">{value === "dps" ? "MAX DPS" : value === "balanced" ? "BALANCED" : "SURVIVABILITY"}</span><span className="text-[10px] font-normal text-muted-foreground">{value === "dps" ? "Pure offense" : value === "balanced" ? "Offense + defense" : "Defense first"}</span></ToggleGroupItem>; })}</ToggleGroup></div>
             <div className="space-y-3"><div className="flex items-center justify-between"><Label>Slots allowed to change</Label><Badge variant="outline">{slots.length} selected</Badge></div><div className="grid grid-cols-2 gap-2">{EQUIPMENT_SLOTS.map((slot) => <Label key={slot} className={cn("flex cursor-pointer items-center gap-3 rounded-md border border-border bg-background/30 p-3 text-xs font-normal transition-colors hover:bg-accent", slots.includes(slot) && "border-primary/35 bg-primary/5")}><Checkbox checked={slots.includes(slot)} onCheckedChange={() => toggleSlot(slot)} />{slotLabels[slot]}</Label>)}</div></div>
             <Separator />
-            <Button size="lg" className="w-full" onClick={run} disabled={loading || !slots.length}>{loading ? <Loader2 className="animate-spin" /> : <Activity />}{loading ? "Fetching listings and running PoB" : "Find best upgrades"}<ArrowRight /></Button>
-            <p className="flex items-center justify-center gap-2 text-center font-mono text-[10px] tracking-wide text-muted-foreground"><DatabaseZap className="size-3 shrink-0 text-emerald-400" />Fetches real listings, replaces each item in the build, and ranks only recalculated improvements.</p>
-            {optimizationError && <Alert variant="destructive"><AlertTitle>Optimization failed</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
+            <Button size="lg" className="w-full" onClick={prepareManualSearch} disabled={!slots.length}><Search />Prepare trade candidates<ArrowRight /></Button>
+            <p className="flex items-center justify-center gap-2 text-center font-mono text-[10px] tracking-wide text-muted-foreground"><DatabaseZap className="size-3 shrink-0 text-emerald-400" />Uses official trade pages and user-copied items; the app sends no automated requests to PoE Trade.</p>
           </CardContent></Card>
         </div>
+
+        <Card id="manual-candidates" className="scroll-mt-24 border-border/80 bg-card/80 shadow-none">
+          <CardHeader className="flex flex-col gap-4 border-b border-border/70 sm:flex-row sm:items-center sm:justify-between">
+            <SectionHeading number="04" eyebrow="OFFICIAL TRADE WORKFLOW" title="Collect candidates" icon={ClipboardPaste} />
+            <Badge variant="outline">{candidates.length}/20 candidates</Badge>
+          </CardHeader>
+          <CardContent className="grid gap-6 pt-6 lg:grid-cols-2">
+            <div className="space-y-4">
+              <div>
+                <h3 className="font-heading text-lg font-semibold">1. Search on the official site</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Open the selected league, set the item category shown below, and cap the price at your {budget} {currency} budget. The link intentionally opens PoE&apos;s normal search form; this app does not call its private trade endpoint.</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {slots.map((slot) => {
+                  const currentItem = build.equipment[slot];
+                  return <Card key={slot} className="gap-3 border-border/70 bg-background/45 p-4 shadow-none">
+                    <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-widest text-primary">{slotLabels[slot]}</p><p className="mt-1 font-heading text-sm font-semibold">{fixedTradeClassLabels[slot] ?? currentItem.itemClass ?? currentItem.baseType}</p><p className="mt-1 text-[10px] text-muted-foreground">Match the current item class</p></div><Badge variant="secondary" className="shrink-0">≤ {budget} {currency === "divine" ? "div" : "chaos"}</Badge></div>
+                    <Button variant="outline" size="sm" asChild className="w-full"><a href={createTradeSiteUrl(league)} target="_blank" rel="noopener noreferrer">Open {league} trade<ExternalLink /></a></Button>
+                  </Card>;
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="font-heading text-lg font-semibold">2. Paste a candidate</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Use the trade listing&apos;s copy-item action, then paste the full text beginning with <span className="font-mono text-foreground">Item Class:</span>. Enter the displayed listing price separately.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
+                <div className="space-y-2"><Label>Replacement slot</Label><Select value={candidateSlot} onValueChange={(value) => setCandidateSlot(value as EquipmentSlot)} disabled={!slots.length}><SelectTrigger className="h-10 w-full bg-background/60"><SelectValue /></SelectTrigger><SelectContent>{slots.map((slot) => <SelectItem key={slot} value={slot}>{slotLabels[slot]}</SelectItem>)}</SelectContent></Select></div>
+                <div className="space-y-2"><Label htmlFor="candidate-price">Listing price</Label><div className="flex"><Input id="candidate-price" type="number" min="0.1" step="0.1" value={candidatePrice} onChange={(event) => setCandidatePrice(Math.max(0.1, Number(event.target.value)))} className="h-10 rounded-r-none bg-background/60" /><Select value={candidateCurrency} onValueChange={(value) => setCandidateCurrency(value as "chaos" | "divine")}><SelectTrigger className="h-10 w-28 rounded-l-none border-l-0 bg-background/60"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="divine">Divine</SelectItem><SelectItem value="chaos">Chaos</SelectItem></SelectContent></Select></div></div>
+              </div>
+              <div className="space-y-2"><Label htmlFor="candidate-text">Copied item text</Label><Textarea id="candidate-text" value={candidateText} onChange={(event) => setCandidateText(event.target.value)} spellCheck={false} placeholder={'Item Class: Rings\nRarity: Rare\nExample Ring\nAmethyst Ring\n--------\n...'} className="min-h-48 resize-y bg-background/60 font-mono text-xs leading-5" /></div>
+              <Button onClick={addCandidate} disabled={!candidateText.trim() || !slots.length} className="w-full"><ClipboardPaste />Add candidate</Button>
+              {candidateError && <Alert variant="destructive"><AlertTitle>Candidate not added</AlertTitle><AlertDescription>{candidateError}</AlertDescription></Alert>}
+            </div>
+
+            <div className="space-y-4 border-t border-border pt-6 lg:col-span-2">
+              <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-lg font-semibold">3. Evaluate with Path of Building</h3><p className="mt-1 text-xs text-muted-foreground">Add several candidates across the selected slots, then rank only genuine improvements.</p></div><Badge variant="secondary">{candidates.length} ready</Badge></div>
+              {candidates.length > 0 ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{candidates.map((candidate) => <Card key={candidate.id} className="gap-3 border-border/70 bg-background/45 p-4 shadow-none"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-mono text-[9px] uppercase tracking-widest text-primary">{slotLabels[candidate.slot]}</p><p className="mt-1 truncate font-heading text-sm font-semibold text-amber-200">{candidate.item.name}</p><p className="truncate text-[10px] text-muted-foreground">{candidate.item.baseType}</p></div><Button variant="ghost" size="icon-sm" onClick={() => removeCandidate(candidate.id)} aria-label={`Remove ${candidate.item.name}`}><Trash2 /></Button></div><div className="flex items-center justify-between border-t border-border/60 pt-3"><span className="text-[10px] text-muted-foreground">{candidate.item.modifiers.length} parsed stats</span><Badge>{candidate.price.amount} {candidate.price.currency === "divine" ? "div" : "chaos"}</Badge></div></Card>)}</div> : <Alert className="border-dashed"><PackageSearch /><AlertTitle>No candidates added</AlertTitle><AlertDescription>Open the official trade site, copy one or more compatible items, and paste each item above.</AlertDescription></Alert>}
+              <Button size="lg" className="w-full" onClick={run} disabled={loading || !candidates.length}>{loading ? <Loader2 className="animate-spin" /> : <DatabaseZap />}{loading ? "Running exact PoB comparisons" : `Evaluate ${candidates.length || ""} candidate${candidates.length === 1 ? "" : "s"}`}<ArrowRight /></Button>
+              {optimizationError && <Alert variant="destructive"><AlertTitle>Optimization failed</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
+            </div>
+          </CardContent>
+        </Card>
       </>}
     </section>
 
     {result && build && <section id="results" className="mx-auto max-w-7xl space-y-5 px-4 py-16 sm:px-6">
-      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 font-mono text-emerald-300"><CheckCircle2 className="size-3" />POB VERIFIED / {result.evaluatedCandidates} LISTINGS</Badge><h2 className="font-heading text-4xl font-semibold">Best upgrade paths</h2><p className="mt-2 text-xs text-muted-foreground">Calculated by {result.engineVersion ?? "Path of Building"}; only positive verified results are ranked.</p></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
+      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 font-mono text-emerald-300"><CheckCircle2 className="size-3" />POB VERIFIED / {result.evaluatedCandidates} CANDIDATES</Badge><h2 className="font-heading text-4xl font-semibold">Best upgrade paths</h2><p className="mt-2 text-xs text-muted-foreground">Calculated by {result.engineVersion ?? "Path of Building"}; only positive verified results are ranked.</p></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
       {result.combinations[0] && <Card className="overflow-hidden border-primary/35 bg-gradient-to-br from-primary/10 via-card to-card shadow-none"><CardHeader className="border-b border-primary/15"><Badge className="mb-2 w-fit gap-1"><Sparkles className="size-3" />BEST COMBINATION</Badge><CardTitle className="font-heading text-2xl">{result.combinations[0].recommendations.map((item) => item.item.name).join(" + ")}</CardTitle><CardDescription>{result.combinations[0].explanation}</CardDescription></CardHeader><CardContent className="grid gap-4 pt-6 sm:grid-cols-3"><div><p className="font-mono text-[10px] text-muted-foreground">TOTAL COST</p><p className="mt-1 font-mono text-xl font-semibold">{formatPrice(result.combinations[0].priceInChaos)}</p></div><div><p className="font-mono text-[10px] text-muted-foreground">DPS CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.totalDps, result.combinations[0].changes.totalDps)} /></p></div><div><p className="font-mono text-[10px] text-muted-foreground">EHP CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.effectiveHitPool, result.combinations[0].changes.effectiveHitPool)} /></p></div></CardContent></Card>}
       <div className="flex items-center justify-between pt-6"><div><p className="font-mono text-[10px] tracking-widest text-primary">RANKED RESULTS</p><h3 className="font-heading text-2xl font-semibold">Best individual upgrades</h3></div><Badge variant="outline">{result.recommendations.length} qualified</Badge></div>
-      {result.recommendations.length > 0 ? <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={`${recommendation.slot}-${recommendation.item.id}`} recommendation={recommendation} baseline={result.baselineMetrics} rank={index + 1} league={league} />)}</div> : <Alert className="border-amber-500/25 bg-amber-500/5"><PackageSearch className="text-amber-300" /><AlertTitle>No verified upgrades found</AlertTitle><AlertDescription>Path of Building recalculated {result.evaluatedCandidates} compatible live listings, but none improved the selected goal within this budget. Increase the budget, change the goal, or select additional slots.</AlertDescription></Alert>}
+      {result.recommendations.length > 0 ? <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={`${recommendation.slot}-${recommendation.item.id}`} recommendation={recommendation} baseline={result.baselineMetrics} rank={index + 1} league={league} />)}</div> : <Alert className="border-amber-500/25 bg-amber-500/5"><PackageSearch className="text-amber-300" /><AlertTitle>No verified upgrades found</AlertTitle><AlertDescription>Path of Building recalculated {result.evaluatedCandidates} compatible pasted candidates, but none improved the selected goal within this budget. Add more candidates, increase the budget, or change the goal.</AlertDescription></Alert>}
     </section>}
 
     <footer className="border-t border-border"><div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-8 font-mono text-[9px] tracking-wider text-muted-foreground sm:flex-row sm:justify-between sm:px-6"><span>POE UPGRADE OPTIMIZER / MVP</span><span>Path of Exile is a trademark of Grinding Gear Games. This project is not affiliated with GGG.</span></div></footer>
