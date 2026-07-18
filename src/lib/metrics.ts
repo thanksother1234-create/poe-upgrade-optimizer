@@ -11,3 +11,6 @@ export const metricKeys = Object.keys({
   coldResistance: 0, lightningResistance: 0, chaosResistance: 0,
 }) as (keyof BuildMetrics)[];
 export const zeroMetrics = (): BuildMetrics => Object.fromEntries(metricKeys.map((key) => [key, 0])) as unknown as BuildMetrics;
+export const subtractMetrics = (after: BuildMetrics, before: BuildMetrics): BuildMetrics => Object.fromEntries(
+  metricKeys.map((key) => [key, after[key] - before[key]]),
+) as unknown as BuildMetrics;

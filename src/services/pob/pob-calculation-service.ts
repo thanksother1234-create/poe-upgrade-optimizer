@@ -1,11 +1,18 @@
-import { Build, BuildMetrics, EquipmentSlot, SimulationResult, TradeItem } from "@/models";
-import { metricKeys } from "@/lib/metrics";
+import { Build, BuildMetrics, CalculationVerification, EquipmentSlot, SimulationResult, TradeItem } from "@/models";
 import { decodePobCode, parsePobXml } from "@/services/pob/pob-build-parser";
+import { applyMetricChanges, estimateItemReplacement } from "@/services/pob/item-effect-estimator";
 
 export interface PobCalculationService {
   importBuild(pobCode: string): Promise<Build>;
   calculateBuild(build: Build): Promise<BuildMetrics>;
   simulateItemReplacement(build: Build, slot: EquipmentSlot, item: TradeItem): Promise<SimulationResult>;
+  simulateItemReplacements(build: Build, items: TradeItem[]): Promise<PobBatchSimulationResult>;
+}
+export interface PobBatchSimulationResult {
+  baseline: BuildMetrics;
+  simulations: SimulationResult[];
+  verification: CalculationVerification;
+  engineVersion?: string;
 }
 async function resolvePobInput(input: string): Promise<string> {
   const trimmed = input.trim();
@@ -24,9 +31,16 @@ export class MvpPobCalculationService implements PobCalculationService {
   }
   async calculateBuild(build: Build) { return structuredClone(build.metrics); }
   async simulateItemReplacement(build: Build, slot: EquipmentSlot, item: TradeItem): Promise<SimulationResult> {
-    const changes = Object.fromEntries(metricKeys.map((key) => [key, item.metricChanges[key] ?? 0])) as unknown as BuildMetrics;
-    const metrics = Object.fromEntries(metricKeys.map((key) => [key, build.metrics[key] + changes[key]])) as unknown as BuildMetrics;
-    return { slot, item, metrics, changes };
+    const changes = estimateItemReplacement(build, slot, item);
+    const metrics = applyMetricChanges(build.metrics, changes);
+    return { slot, item, metrics, changes, verification: "estimated" };
+  }
+  async simulateItemReplacements(build: Build, items: TradeItem[]): Promise<PobBatchSimulationResult> {
+    return {
+      baseline: structuredClone(build.metrics),
+      simulations: await Promise.all(items.map((item) => this.simulateItemReplacement(build, item.slot, item))),
+      verification: "estimated",
+    };
   }
 }
 
