@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PoE Upgrade Optimizer",
-  description: "Deterministic Path of Exile upgrade analysis within your budget.",
+  description: "Compare real Path of Exile items against your build with exact Path of Building calculations.",
 };
 
 export default function RootLayout({
@@ -31,7 +31,6 @@ export default function RootLayout({
     >
       <body className="min-h-full">
         <TooltipProvider>{children}</TooltipProvider>
-        <Analytics />
       </body>
     </html>
   );
