@@ -32,6 +32,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 const pobService = new MvpPobCalculationService();
 const slotLabels: Record<EquipmentSlot, string> = { weapon: "Weapon", offhand: "Offhand", helmet: "Helmet", bodyArmour: "Body Armour", gloves: "Gloves", boots: "Boots", amulet: "Amulet", ring1: "Ring 1", ring2: "Ring 2", belt: "Belt" };
 const fixedTradeClassLabels: Partial<Record<EquipmentSlot, string>> = { helmet: "Helmets", bodyArmour: "Body Armours", gloves: "Gloves", boots: "Boots", amulet: "Amulets", ring1: "Rings", ring2: "Rings", belt: "Belts" };
+const tradeCategoryLabels: Record<string, string> = {
+  "weapon.wand": "Wands", "weapon.bow": "Bows", "weapon.claw": "Claws", "weapon.dagger": "Daggers",
+  "weapon.runedagger": "Rune Daggers", "weapon.oneaxe": "One Hand Axes", "weapon.onemace": "One Hand Maces",
+  "weapon.onesword": "One Hand Swords", "weapon.rapier": "Thrusting One Hand Swords", "weapon.sceptre": "Sceptres",
+  "weapon.staff": "Staves", "weapon.warstaff": "Warstaves", "weapon.twoaxe": "Two Hand Axes",
+  "weapon.twomace": "Two Hand Maces", "weapon.twosword": "Two Hand Swords", "weapon.rod": "Fishing Rods",
+  "armour.shield": "Shields", "accessory.quiver": "Quivers", "armour.helmet": "Helmets", "armour.chest": "Body Armours",
+  "armour.gloves": "Gloves", "armour.boots": "Boots", "accessory.amulet": "Amulets", "accessory.ring": "Rings",
+  "accessory.belt": "Belts",
+};
 const defaultSlots: EquipmentSlot[] = ["weapon", "boots", "amulet", "ring1", "ring2"];
 const fallbackLeague: PoeLeague = { id: "Standard", name: "Standard", realm: "pc", startAt: "2013-01-23T21:00:00Z", endAt: null };
 
@@ -159,6 +169,7 @@ function CandidateEvaluationCard({ evaluation, baseline }: { evaluation: Candida
 function WeightedSearchEditor({
   slot,
   draft,
+  itemClass,
   league,
   copied,
   onWeightChange,
@@ -170,6 +181,7 @@ function WeightedSearchEditor({
 }: {
   slot: EquipmentSlot;
   draft: WeightedTradeSearchDraft;
+  itemClass: string;
   league: string;
   copied: boolean;
   onWeightChange: (id: string, weight: number) => void;
@@ -185,7 +197,7 @@ function WeightedSearchEditor({
 
   return <Card className="gap-0 overflow-hidden border-primary/25 bg-background/55 py-0 shadow-inner sm:col-span-2">
     <CardHeader className="flex flex-row items-start justify-between gap-4 border-b border-border/70 px-5 py-4">
-      <div><CardDescription className="text-xs font-medium text-primary">{slotLabels[slot]} weighted sum</CardDescription><CardTitle className="mt-1 font-heading text-xl">Tune the stat multipliers</CardTitle><p className="mt-1 text-xs leading-5 text-muted-foreground">These suggestions come from your build and selected goal. Set a stat to 0 to leave it out, or use a negative value to penalize it.</p></div>
+      <div className="min-w-0"><CardDescription className="text-xs font-medium text-primary">{slotLabels[slot]} weighted sum</CardDescription><CardTitle className="mt-1 font-heading text-xl">Tune the stat multipliers</CardTitle><p className="mt-1 text-xs leading-5 text-muted-foreground">These suggestions come from your build and selected goal. Set a stat to 0 to leave it out, or use a negative value to penalize it.</p><p className="mt-2 truncate text-xs"><span className="text-muted-foreground">Item class:</span> {itemClass}</p></div>
       <Badge variant="secondary" className="shrink-0">{activeOptions} active</Badge>
     </CardHeader>
     <CardContent className="space-y-4 p-5">
@@ -200,13 +212,11 @@ function WeightedSearchEditor({
           <div className="relative"><span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 font-mono text-xs text-muted-foreground">×</span><Input type="number" step="0.01" value={option.weight} onChange={(event) => onWeightChange(option.id, Number(event.target.value) || 0)} aria-label={`Weight for ${option.label}`} className="h-9 bg-background/70 pl-6 text-right font-mono" /></div>
         </div>)}
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-        <Button variant="ghost" onClick={onReset}><RotateCcw />Reset suggestions</Button>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" onClick={onCopy}>{copied ? <Check /> : <Copy />}{copied ? "Link copied" : "Copy weighted link"}</Button>
-          <Button variant="outline" onClick={onDone}>Done editing</Button>
-          <Button asChild><a href={tradeUrl} target="_blank" rel="noopener noreferrer">Open weighted search<ExternalLink /></a></Button>
-        </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant="ghost" className="min-w-0" onClick={onReset}><RotateCcw />Reset</Button>
+        <Button variant="outline" className="min-w-0" onClick={onCopy}>{copied ? <Check /> : <Copy />}{copied ? "Link copied" : "Copy link"}</Button>
+        <Button variant="outline" className="min-w-0" onClick={onDone}>Done</Button>
+        <Button className="min-w-0" asChild><a href={tradeUrl} target="_blank" rel="noopener noreferrer">Open search<ExternalLink /></a></Button>
       </div>
     </CardContent>
   </Card>;
@@ -434,8 +444,9 @@ export default function OptimizerDashboard() {
                 {slots.map((slot) => {
                   const currentItem = build.equipment[slot];
                   const weightedSearch = weightedSearches[slot];
+                  const itemClassLabel = currentItem.itemClass?.trim() || (weightedSearch?.category ? tradeCategoryLabels[weightedSearch.category] : undefined) || fixedTradeClassLabels[slot] || "Any compatible item";
                   return <Card key={slot} className="gap-3 border-border/70 bg-background/35 p-4 shadow-none transition-colors hover:bg-background/50">
-                    <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-medium text-primary">{slotLabels[slot]}</p><p className="mt-1 font-heading text-base font-semibold">{fixedTradeClassLabels[slot] ?? currentItem.itemClass ?? currentItem.baseType}</p><p className="mt-1 text-xs capitalize text-muted-foreground">{weightedSearch?.profile ?? "build"} search profile</p></div><Badge variant="secondary" className="shrink-0">Up to {budget} {currency === "divine" ? "div" : "chaos"}</Badge></div>
+                    <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-medium text-primary">{slotLabels[slot]}</p><p className="mt-1 truncate font-heading text-base font-semibold">{itemClassLabel}</p><p className="mt-1 truncate text-xs capitalize text-muted-foreground">{currentItem.baseType} · {weightedSearch?.profile ?? "build"} profile</p></div><Badge variant="secondary" className="shrink-0">Up to {budget} {currency === "divine" ? "div" : "chaos"}</Badge></div>
                     {weightedSearch && <div className="space-y-1.5 border-y border-border/60 py-3">
                       {weightedSearch.options.slice(0, 4).map((option) => <div key={option.id} className="flex items-start justify-between gap-3 text-[10px]"><span className="min-w-0 leading-4 text-muted-foreground">{option.label}</span><span className="shrink-0 font-mono text-primary">×{option.weight}</span></div>)}
                       {weightedSearch.options.length > 4 && <p className="font-mono text-[9px] text-muted-foreground">+ {weightedSearch.options.length - 4} more weighted stats</p>}
@@ -449,6 +460,7 @@ export default function OptimizerDashboard() {
                 {weightEditorSlot && weightedSearches[weightEditorSlot] && <WeightedSearchEditor
                   slot={weightEditorSlot}
                   draft={weightedSearches[weightEditorSlot]}
+                  itemClass={build.equipment[weightEditorSlot].itemClass?.trim() || (weightedSearches[weightEditorSlot].category ? tradeCategoryLabels[weightedSearches[weightEditorSlot].category] : undefined) || fixedTradeClassLabels[weightEditorSlot] || "Any compatible item"}
                   league={league}
                   copied={copiedWeightedSlot === weightEditorSlot}
                   onWeightChange={(id, weight) => updateWeightedWeight(weightEditorSlot, id, weight)}
