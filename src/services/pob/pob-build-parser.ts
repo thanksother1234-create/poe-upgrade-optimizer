@@ -49,12 +49,15 @@ function parseItems(xml: string): Map<string, Item> {
     const id = attributes(match[1]).id;
     const rawText = decodeEntities(match[2].replace(/<[^>]+>/g, ""));
     const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const rarityMatch = lines[0]?.match(/^Rarity:\s*(\w+)/i);
+    const itemClass = lines.find((line) => line.startsWith("Item Class:"))?.slice("Item Class:".length).trim();
+    const rarityIndex = lines.findIndex((line) => /^Rarity:\s*\w+/i.test(line));
+    const rarityMatch = lines[rarityIndex]?.match(/^Rarity:\s*(\w+)/i);
     const rarity = (rarityMatch?.[1]?.toLowerCase() ?? "normal") as ItemRarity;
-    const displayLines = rarity === "normal" ? lines.slice(1, 2) : lines.slice(1, 3);
+    const displayStart = rarityIndex >= 0 ? rarityIndex + 1 : 0;
+    const displayLines = rarity === "normal" ? lines.slice(displayStart, displayStart + 1) : lines.slice(displayStart, displayStart + 2);
     const name = displayLines[0] ?? "Unknown Item";
     const baseType = displayLines[1] ?? displayLines[0] ?? "Unknown Base";
-    items.set(id, { id: `pob-item-${id}`, name, baseType, rarity, modifiers: parseModifiers(lines) });
+    items.set(id, { id: `pob-item-${id}`, name, baseType, itemClass, rarity, modifiers: parseModifiers(lines) });
   }
   return items;
 }
@@ -129,7 +132,7 @@ export function parsePobXml(xml: string): Build {
       name, className: buildAttrs.className ?? "Unknown class", ascendancy: buildAttrs.ascendClassName ?? "",
       level: number(buildAttrs.level), mainSkill: parseMainSkill(xml, number(buildAttrs.mainSocketGroup) || 1), league: "Imported PoB",
     },
-    equipment: parseEquipment(xml, parseItems(xml)), metrics,
+    equipment: parseEquipment(xml, parseItems(xml)), metrics, sourceXml: xml,
   };
 }
 

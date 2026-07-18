@@ -9,8 +9,6 @@ import {
 } from "lucide-react";
 import { Build, EQUIPMENT_SLOTS, EquipmentSlot, LeagueResponse, OptimizationGoal, OptimizationResult, PoeLeague, UpgradeRecommendation } from "@/models";
 import { MvpPobCalculationService } from "@/services/pob/pob-calculation-service";
-import { MockTradeMarketService } from "@/services/trade/trade-market-service";
-import { UpgradeOptimizer } from "@/services/optimizer/upgrade-optimizer";
 import { isPermanentLeague } from "@/services/league/league-service";
 import { formatNumber, formatPrice, percentChange } from "@/lib/metrics";
 import { cn } from "@/lib/utils";
@@ -29,7 +27,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const pobService = new MvpPobCalculationService();
-const optimizer = new UpgradeOptimizer(pobService, new MockTradeMarketService());
 const slotLabels: Record<EquipmentSlot, string> = { weapon: "Weapon", offhand: "Offhand", helmet: "Helmet", bodyArmour: "Body Armour", gloves: "Gloves", boots: "Boots", amulet: "Amulet", ring1: "Ring 1", ring2: "Ring 2", belt: "Belt" };
 const defaultSlots: EquipmentSlot[] = ["weapon", "boots", "amulet", "ring1", "ring2"];
 const fallbackLeague: PoeLeague = { id: "Standard", name: "Standard", realm: "pc", startAt: "2013-01-23T21:00:00Z", endAt: null };
@@ -87,10 +84,10 @@ function ItemPreview({ recommendation }: { recommendation: UpgradeRecommendation
   </TooltipProvider>;
 }
 
-function RecommendationCard({ recommendation, build, rank, league }: { recommendation: UpgradeRecommendation; build: Build; rank: number; league: string }) {
-  const dps = percentChange(build.metrics.totalDps, recommendation.changes.totalDps);
-  const ehp = percentChange(build.metrics.effectiveHitPool, recommendation.changes.effectiveHitPool);
-  const tradeHref = `/api/trade/item?league=${encodeURIComponent(league)}&item=${encodeURIComponent(recommendation.item.id)}`;
+function RecommendationCard({ recommendation, baseline, rank, league }: { recommendation: UpgradeRecommendation; baseline: Build["metrics"]; rank: number; league: string }) {
+  const dps = percentChange(baseline.totalDps, recommendation.changes.totalDps);
+  const ehp = percentChange(baseline.effectiveHitPool, recommendation.changes.effectiveHitPool);
+  const tradeHref = recommendation.item.tradeUrl ?? `/api/trade/item?league=${encodeURIComponent(league)}&item=${encodeURIComponent(recommendation.item.id)}`;
   return <Card className="gap-0 overflow-hidden border-border/80 bg-card/80 py-0 shadow-none transition-colors hover:border-primary/35">
     <CardHeader className="grid grid-cols-[auto_1fr_auto] items-start gap-3 border-b border-border/70 px-5 py-5">
       <div className="flex flex-col items-center gap-2"><Badge variant="outline" className="font-mono text-muted-foreground">#{rank.toString().padStart(2, "0")}</Badge><ItemPreview recommendation={recommendation} /></div>
@@ -98,8 +95,8 @@ function RecommendationCard({ recommendation, build, rank, league }: { recommend
       <Badge className="bg-primary text-primary-foreground">{formatPrice(recommendation.priceInChaos)}</Badge>
     </CardHeader>
     <CardContent className="space-y-4 p-5">
-      <div className="grid grid-cols-4 divide-x divide-border rounded-md border border-border bg-background/40">{[["DPS", <Delta key="dps" value={dps} />], ["EHP", <Delta key="ehp" value={ehp} />], ["PHYS", <Delta key="phys" value={percentChange(build.metrics.physicalMaxHit, recommendation.changes.physicalMaxHit)} />], ["SCORE", <span key="score" className="font-mono font-semibold">{recommendation.score.toFixed(1)}</span>]].map(([label, value]) => <div key={label as string} className="space-y-1 px-3 py-2"><p className="font-mono text-[9px] text-muted-foreground">{label}</p>{value}</div>)}</div>
-      <div className="flex items-center justify-between gap-3"><p className="text-[10px] text-muted-foreground">Searches {recommendation.item.baseType} listings in {league}.</p><Button variant="link" size="sm" asChild className="h-auto shrink-0 px-0 text-xs"><a href={tradeHref} target="_blank" rel="noopener noreferrer" aria-label={`Find ${recommendation.item.baseType} listings on the official Path of Exile trade site`}>Open trade search<ExternalLink /></a></Button></div>
+      <div className="grid grid-cols-4 divide-x divide-border rounded-md border border-border bg-background/40">{[["DPS", <Delta key="dps" value={dps} />], ["EHP", <Delta key="ehp" value={ehp} />], ["PHYS", <Delta key="phys" value={percentChange(baseline.physicalMaxHit, recommendation.changes.physicalMaxHit)} />], ["SCORE", <span key="score" className="font-mono font-semibold">{recommendation.score.toFixed(1)}</span>]].map(([label, value]) => <div key={label as string} className="space-y-1 px-3 py-2"><p className="font-mono text-[9px] text-muted-foreground">{label}</p>{value}</div>)}</div>
+      <div className="flex items-center justify-between gap-3"><p className="text-[10px] text-muted-foreground">Live {recommendation.item.baseType} listing in {league}, verified by PoB.</p><Button variant="link" size="sm" asChild className="h-auto shrink-0 px-0 text-xs"><a href={tradeHref} target="_blank" rel="noopener noreferrer" aria-label={`Open the live ${recommendation.item.name} listing on the official Path of Exile trade site`}>Open live listing<ExternalLink /></a></Button></div>
       <div className="flex flex-wrap gap-2">{recommendation.item.modifiers.slice(0, 2).map((mod) => <Badge variant="secondary" key={mod.label} className="font-normal text-muted-foreground">{mod.label}</Badge>)}</div>
       <Alert className="border-primary/20 bg-primary/5"><Sparkles className="text-primary" /><AlertTitle className="font-mono text-[10px] tracking-wider text-primary">WHY THIS UPGRADE</AlertTitle><AlertDescription>{recommendation.explanation}</AlertDescription></Alert>
     </CardContent>
@@ -117,6 +114,7 @@ export default function OptimizerDashboard() {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
+  const [optimizationError, setOptimizationError] = useState("");
   const [leagues, setLeagues] = useState<PoeLeague[]>([fallbackLeague]);
   const [league, setLeague] = useState("Standard");
   const [currentLeague, setCurrentLeague] = useState("Standard");
@@ -136,8 +134,26 @@ export default function OptimizerDashboard() {
   }, []);
 
   const leagueGroups = useMemo(() => ({ challenge: leagues.filter((item) => !isPermanentLeague(item)).length, permanent: leagues.filter(isPermanentLeague).length }), [leagues]);
-  const importBuild = async () => { try { setImporting(true); setError(""); setBuild(await pobService.importBuild(pobCode)); setResult(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Import failed"); } finally { setImporting(false); } };
-  const run = async () => { if (!build || !slots.length) return; setLoading(true); setResult(await optimizer.optimize({ build, budget: { amount: budget, currency }, goal, allowedSlots: slots, league })); setLoading(false); setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth" }), 20); };
+  const importBuild = async () => { try { setImporting(true); setError(""); setOptimizationError(""); setBuild(await pobService.importBuild(pobCode)); setResult(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Import failed"); } finally { setImporting(false); } };
+  const run = async () => {
+    if (!build?.sourceXml || !slots.length) return;
+    try {
+      setLoading(true); setOptimizationError(""); setResult(null);
+      const response = await fetch("/api/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ buildXml: build.sourceXml, budget: { amount: budget, currency }, goal, allowedSlots: slots, league }),
+      });
+      const payload = await response.json() as OptimizationResult & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "The live optimizer could not complete this search.");
+      setResult(payload);
+      setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth" }), 20);
+    } catch (caught) {
+      setOptimizationError(caught instanceof Error ? caught.message : "The live optimizer could not complete this search.");
+    } finally {
+      setLoading(false);
+    }
+  };
   const toggleSlot = (slot: EquipmentSlot) => setSlots((current) => current.includes(slot) ? current.filter((item) => item !== slot) : [...current, slot]);
 
   return <main className="min-h-screen bg-background text-foreground">
@@ -150,7 +166,7 @@ export default function OptimizerDashboard() {
 
     <section id="top" className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_auto] lg:items-end lg:py-20">
       <div><Badge variant="outline" className="mb-5 font-mono tracking-widest text-primary">BUILD INTELLIGENCE / 01</Badge><h1 className="max-w-3xl font-heading text-5xl font-semibold leading-[0.95] tracking-tight sm:text-7xl">Spend smarter.<br /><span className="text-primary">Scale harder.</span></h1><p className="mt-6 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">Import your build, choose the market you play in, and rank upgrades using deterministic simulations within your budget.</p></div>
-      <Card className="min-w-72 border-primary/20 bg-primary/5 shadow-none"><CardHeader><CardDescription className="font-mono text-[10px] tracking-widest">SIMULATION MODEL</CardDescription><CardTitle className="flex items-center gap-2"><DatabaseZap className="size-5 text-primary" />PoB-compatible</CardTitle></CardHeader><CardContent className="font-mono text-[10px] tracking-wider text-muted-foreground">MOCK TRADE ADAPTER / DETERMINISTIC</CardContent></Card>
+      <Card className="min-w-72 border-primary/20 bg-primary/5 shadow-none"><CardHeader><CardDescription className="font-mono text-[10px] tracking-widest">CALCULATION MODEL</CardDescription><CardTitle className="flex items-center gap-2"><DatabaseZap className="size-5 text-primary" />Full Path of Building</CardTitle></CardHeader><CardContent className="font-mono text-[10px] tracking-wider text-muted-foreground">LIVE LISTING / ITEM REPLACEMENT / RECALCULATE</CardContent></Card>
     </section>
 
     <section className="mx-auto max-w-7xl space-y-4 px-4 pb-12 sm:px-6">
@@ -176,18 +192,19 @@ export default function OptimizerDashboard() {
             <div className="space-y-2"><Label>Optimization goal</Label><ToggleGroup type="single" variant="outline" value={goal} onValueChange={(value) => value && setGoal(value as OptimizationGoal)} className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">{(["dps", "balanced", "survivability"] as const).map((value) => { const Icon = value === "dps" ? Sword : value === "balanced" ? Scale : Shield; return <ToggleGroupItem key={value} value={value} className="h-20 flex-col gap-1 data-[state=on]:border-primary data-[state=on]:bg-primary/10 data-[state=on]:text-primary"><Icon className="size-5" /><span className="text-xs font-semibold">{value === "dps" ? "MAX DPS" : value === "balanced" ? "BALANCED" : "SURVIVABILITY"}</span><span className="text-[10px] font-normal text-muted-foreground">{value === "dps" ? "Pure offense" : value === "balanced" ? "Offense + defense" : "Defense first"}</span></ToggleGroupItem>; })}</ToggleGroup></div>
             <div className="space-y-3"><div className="flex items-center justify-between"><Label>Slots allowed to change</Label><Badge variant="outline">{slots.length} selected</Badge></div><div className="grid grid-cols-2 gap-2">{EQUIPMENT_SLOTS.map((slot) => <Label key={slot} className={cn("flex cursor-pointer items-center gap-3 rounded-md border border-border bg-background/30 p-3 text-xs font-normal transition-colors hover:bg-accent", slots.includes(slot) && "border-primary/35 bg-primary/5")}><Checkbox checked={slots.includes(slot)} onCheckedChange={() => toggleSlot(slot)} />{slotLabels[slot]}</Label>)}</div></div>
             <Separator />
-            <Button size="lg" className="w-full" onClick={run} disabled={loading || !slots.length}>{loading ? <Loader2 className="animate-spin" /> : <Activity />}{loading ? "Running simulations" : "Find best upgrades"}<ArrowRight /></Button>
-            <p className="flex items-center justify-center gap-2 font-mono text-[10px] tracking-wide text-muted-foreground"><DatabaseZap className="size-3 text-emerald-400" />Deterministic mock simulations. No LLM calculations.</p>
+            <Button size="lg" className="w-full" onClick={run} disabled={loading || !slots.length}>{loading ? <Loader2 className="animate-spin" /> : <Activity />}{loading ? "Fetching listings and running PoB" : "Find best upgrades"}<ArrowRight /></Button>
+            <p className="flex items-center justify-center gap-2 text-center font-mono text-[10px] tracking-wide text-muted-foreground"><DatabaseZap className="size-3 shrink-0 text-emerald-400" />Fetches real listings, replaces each item in the build, and ranks only recalculated improvements.</p>
+            {optimizationError && <Alert variant="destructive"><AlertTitle>Optimization failed</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
           </CardContent></Card>
         </div>
       </>}
     </section>
 
     {result && build && <section id="results" className="mx-auto max-w-7xl space-y-5 px-4 py-16 sm:px-6">
-      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 font-mono text-emerald-300"><CheckCircle2 className="size-3" />OPTIMIZATION COMPLETE</Badge><h2 className="font-heading text-4xl font-semibold">Best upgrade paths</h2></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
-      {result.combinations[0] && <Card className="overflow-hidden border-primary/35 bg-gradient-to-br from-primary/10 via-card to-card shadow-none"><CardHeader className="border-b border-primary/15"><Badge className="mb-2 w-fit gap-1"><Sparkles className="size-3" />BEST COMBINATION</Badge><CardTitle className="font-heading text-2xl">{result.combinations[0].recommendations.map((item) => item.item.name).join(" + ")}</CardTitle><CardDescription>{result.combinations[0].explanation}</CardDescription></CardHeader><CardContent className="grid gap-4 pt-6 sm:grid-cols-3"><div><p className="font-mono text-[10px] text-muted-foreground">TOTAL COST</p><p className="mt-1 font-mono text-xl font-semibold">{formatPrice(result.combinations[0].priceInChaos)}</p></div><div><p className="font-mono text-[10px] text-muted-foreground">DPS CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(build.metrics.totalDps, result.combinations[0].changes.totalDps)} /></p></div><div><p className="font-mono text-[10px] text-muted-foreground">EHP CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(build.metrics.effectiveHitPool, result.combinations[0].changes.effectiveHitPool)} /></p></div></CardContent></Card>}
+      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 font-mono text-emerald-300"><CheckCircle2 className="size-3" />POB VERIFIED / {result.evaluatedCandidates} LISTINGS</Badge><h2 className="font-heading text-4xl font-semibold">Best upgrade paths</h2><p className="mt-2 text-xs text-muted-foreground">Calculated by {result.engineVersion ?? "Path of Building"}; only positive verified results are ranked.</p></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
+      {result.combinations[0] && <Card className="overflow-hidden border-primary/35 bg-gradient-to-br from-primary/10 via-card to-card shadow-none"><CardHeader className="border-b border-primary/15"><Badge className="mb-2 w-fit gap-1"><Sparkles className="size-3" />BEST COMBINATION</Badge><CardTitle className="font-heading text-2xl">{result.combinations[0].recommendations.map((item) => item.item.name).join(" + ")}</CardTitle><CardDescription>{result.combinations[0].explanation}</CardDescription></CardHeader><CardContent className="grid gap-4 pt-6 sm:grid-cols-3"><div><p className="font-mono text-[10px] text-muted-foreground">TOTAL COST</p><p className="mt-1 font-mono text-xl font-semibold">{formatPrice(result.combinations[0].priceInChaos)}</p></div><div><p className="font-mono text-[10px] text-muted-foreground">DPS CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.totalDps, result.combinations[0].changes.totalDps)} /></p></div><div><p className="font-mono text-[10px] text-muted-foreground">EHP CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.effectiveHitPool, result.combinations[0].changes.effectiveHitPool)} /></p></div></CardContent></Card>}
       <div className="flex items-center justify-between pt-6"><div><p className="font-mono text-[10px] tracking-widest text-primary">RANKED RESULTS</p><h3 className="font-heading text-2xl font-semibold">Best individual upgrades</h3></div><Badge variant="outline">{result.recommendations.length} qualified</Badge></div>
-      <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={recommendation.item.id} recommendation={recommendation} build={build} rank={index + 1} league={league} />)}</div>
+      {result.recommendations.length > 0 ? <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={`${recommendation.slot}-${recommendation.item.id}`} recommendation={recommendation} baseline={result.baselineMetrics} rank={index + 1} league={league} />)}</div> : <Alert className="border-amber-500/25 bg-amber-500/5"><PackageSearch className="text-amber-300" /><AlertTitle>No verified upgrades found</AlertTitle><AlertDescription>Path of Building recalculated {result.evaluatedCandidates} compatible live listings, but none improved the selected goal within this budget. Increase the budget, change the goal, or select additional slots.</AlertDescription></Alert>}
     </section>}
 
     <footer className="border-t border-border"><div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-8 font-mono text-[9px] tracking-wider text-muted-foreground sm:flex-row sm:justify-between sm:px-6"><span>POE UPGRADE OPTIMIZER / MVP</span><span>Path of Exile is a trademark of Grinding Gear Games. This project is not affiliated with GGG.</span></div></footer>

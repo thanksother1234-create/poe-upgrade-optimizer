@@ -1,0 +1,7 @@
+services:
+  pob-engine:
+    build: .
+    ports:
+      - "4317:7860"
+    environment:
+      ENGINE_TOKEN: ${ENGINE_TOKEN:-local-development-token}

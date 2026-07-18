@@ -12,6 +12,7 @@ const xml = `<?xml version="1.0"?><PathOfBuilding>
 <Skills activeSkillSet="1"><SkillSet id="1"><Skill><Gem nameSpec="Kinetic Blast" skillId="KineticBlast"/></Skill></SkillSet></Skills>
 <Import importLink="https://example.com/profile/ActualCharacter"/>
 <Items activeItemSet="2"><Item id="10">
+Item Class: Wands
 Rarity: RARE
 Glyph Chant
 Kinetic Wand
@@ -42,6 +43,7 @@ describe("PoB build parser", () => {
     expect(build.character).toMatchObject({ name: "ActualCharacter", className: "Marauder", ascendancy: "Juggernaut", level: 98, mainSkill: "Kinetic Blast" });
     expect(build.metrics).toMatchObject({ totalDps: 6701956, effectiveHitPool: 46578, elementalMaxHit: 33540 });
     expect(build.equipment.weapon).toMatchObject({ name: "Glyph Chant", baseType: "Kinetic Wand", rarity: "rare" });
+    expect(build.equipment.weapon.itemClass).toBe("Wands");
     expect(build.equipment.weapon.modifiers.map((modifier) => modifier.label)).toContain("Adds 82 to 136 Chaos Damage");
     expect(build.equipment.belt).toMatchObject({ name: "Mageblood", baseType: "Heavy Belt", rarity: "unique" });
   });

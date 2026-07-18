@@ -17,7 +17,9 @@
     "check:vinext": "vinext check",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:engine": "node --test pob-engine/server.node-test.mjs",
+    "deploy:engine:hf": "node scripts/deploy-huggingface-engine.mjs"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
