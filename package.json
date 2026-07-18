@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.12.0"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "vinext dev",
@@ -47,7 +47,6 @@
     "typescript": "^5",
     "vinext": "^1.0.0-beta.2",
     "vite": "^8.0.1",
-    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.2.4"
   }
 }
