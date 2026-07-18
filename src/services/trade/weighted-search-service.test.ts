@@ -32,6 +32,19 @@ describe("weighted trade search", () => {
     expect(lightning?.weight).toBeGreaterThan(fire?.weight ?? 0);
   });
 
+  it("does not suggest life or resistance modifiers for weapons", () => {
+    const build = structuredClone(mockBuild);
+    build.equipment.weapon.itemClass = "One Hand Swords";
+    const weapon = createWeightedTradeSearch(build, "weapon", "balanced", { amount: 5, currency: "divine" });
+    const ids = weapon.options.map((option) => option.id);
+    expect(ids).not.toContain("pseudo.pseudo_total_life");
+    expect(ids.some((id) => id.includes("resistance"))).toBe(false);
+
+    build.equipment.offhand = { ...build.equipment.weapon, id: "offhand-sword" };
+    const offhand = createWeightedTradeSearch(build, "offhand", "balanced", { amount: 5, currency: "divine" });
+    expect(offhand.options.some((option) => option.id.includes("resistance"))).toBe(false);
+  });
+
   it("formats both readable weights and query JSON for copying", () => {
     const draft = createWeightedTradeSearch(structuredClone(mockBuild), "weapon", "dps", { amount: 5, currency: "divine" });
     const text = formatWeightedSearchRecipe(draft, "Mirage");

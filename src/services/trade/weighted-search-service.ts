@@ -93,6 +93,8 @@ function offenseOptions(profile: WeightedTradeSearchDraft["profile"], build: Bui
 
 function defenseOptions(build: Build, slot: EquipmentSlot, scale: number): WeightedTradeOption[] {
   if (scale <= 0) return [];
+  const category = getTradeCategory(slot, build.equipment[slot]);
+  if (slot === "weapon" || category?.startsWith("weapon.")) return [];
   const metrics = build.metrics;
   const option = (id: string, label: string, weight: number, reason: string): WeightedTradeOption => ({ id, label, weight: rounded(weight * scale), reason });
   const resistanceWeight = (value: number) => value < 75 ? 1.4 + Math.min(1.6, (75 - value) / 25) : 0.18;
