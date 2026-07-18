@@ -10,12 +10,11 @@ export type CurrencyUnit = "chaos" | "divine";
 export interface CurrencyAmount { amount: number; currency: CurrencyUnit }
 export interface ItemModifier { label: string; value: number; metric?: keyof BuildMetrics }
 export type ItemRarity = "normal" | "magic" | "rare" | "unique";
-export interface Item { id: string; name: string; baseType: string; itemClass?: string; rarity: ItemRarity; modifiers: ItemModifier[] }
+export interface Item { id: string; name: string; baseType: string; itemClass?: string; rarity: ItemRarity; modifiers: ItemModifier[]; rawText?: string }
 export interface TradeItem extends Item {
   slot: EquipmentSlot;
   imageUrl?: string;
   price: CurrencyAmount;
-  rawText?: string;
   tradeUrl?: string;
 }
 export type Equipment = Record<EquipmentSlot, Item>;
