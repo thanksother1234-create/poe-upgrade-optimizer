@@ -14,6 +14,13 @@ describe("UpgradeOptimizer", () => {
   it("DPS mode favors the highest damage improvement", async () => { const result = await run("dps"); expect(result.recommendations[0].item.id).toBe("w1"); });
   it("survivability mode favors defensive improvements", async () => { const result = await run("survivability"); expect(result.recommendations[0].changes.effectiveHitPool).toBeGreaterThan(0); });
   it("balanced mode returns only positive weighted improvements", async () => { const result = await run("balanced"); expect(result.recommendations.length).toBeGreaterThan(0); expect(result.recommendations.every((recommendation) => recommendation.score > 0)).toBe(true); });
+  it("retains exact reasons and metrics for candidates that do not qualify", async () => {
+    const result = await run("balanced");
+    expect(result.candidateEvaluations).toHaveLength(result.evaluatedCandidates);
+    const rejected = result.candidateEvaluations.filter((evaluation) => !evaluation.qualified);
+    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected.every((evaluation) => evaluation.rejectionReasons.length > 0)).toBe(true);
+  });
   it("ranks an expensive poor-value item below a cheaper strong-value item", async () => { const result = await run("dps"); const cheap = result.recommendations.findIndex((r) => r.item.id === "w2"); const expensive = result.recommendations.findIndex((r) => r.item.id === "w3"); expect(cheap).toBeGreaterThanOrEqual(0); expect(expensive).toBeGreaterThan(cheap); });
   it("recommends two-handed swords instead of wands for an imported greatsword build", async () => {
     const build = structuredClone(mockBuild);

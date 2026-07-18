@@ -36,6 +36,13 @@ export interface SimulationResult {
   verification: CalculationVerification;
 }
 export interface UpgradeRecommendation extends SimulationResult { currentItem: Item; priceInChaos: number; score: number; explanation: string }
+export interface CandidateEvaluation extends SimulationResult {
+  currentItem: Item;
+  priceInChaos: number;
+  score: number;
+  qualified: boolean;
+  rejectionReasons: string[];
+}
 export interface UpgradeCombination { recommendations: UpgradeRecommendation[]; priceInChaos: number; score: number; changes: BuildMetrics; explanation: string }
 export interface OptimizationRequest {
   build: Build;
@@ -47,6 +54,7 @@ export interface OptimizationRequest {
 }
 export interface OptimizationResult {
   recommendations: UpgradeRecommendation[];
+  candidateEvaluations: CandidateEvaluation[];
   combinations: UpgradeCombination[];
   budgetInChaos: number;
   baselineMetrics: BuildMetrics;
