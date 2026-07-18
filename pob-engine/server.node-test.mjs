@@ -21,6 +21,13 @@ test("supports multiple replacements in one scenario", () => {
   assert.match(replaced, /<Slot name="Belt" itemId="6"\/>/);
 });
 
+test("replaces the active swap weapon when the item set uses its second weapon set", () => {
+  const swapBuild = `<PathOfBuilding><Items activeItemSet="1"><Item id="1">Old Sword</Item><ItemSet id="1" useSecondWeaponSet="true"><Slot name="Weapon 1" itemId="0"/><Slot name="Weapon 1 Swap" itemId="1"/></ItemSet></Items></PathOfBuilding>`;
+  const replaced = replaceItemsInBuildXml(swapBuild, [{ slot: "weapon", rawText: "Rarity: RARE\nNew Sword\nCorsair Sword" }]);
+  assert.match(replaced, /<Slot name="Weapon 1" itemId="0"\/>/);
+  assert.match(replaced, /<Slot name="Weapon 1 Swap" itemId="2"\/>/);
+});
+
 test("parses metrics after Path of Building log prefixes and reports a missing candidate", () => {
   const metricValues = Array.from({ length: 14 }, (_, index) => String(index + 1)).join("\t");
   const output = `PoB startup log\n\u001b[32mworker: POE_METRICS\t0\t${metricValues}\u001b[0m\n`;

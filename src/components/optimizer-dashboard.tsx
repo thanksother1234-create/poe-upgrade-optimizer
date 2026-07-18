@@ -87,6 +87,17 @@ function Delta({ value, suffix = "%" }: { value: number; suffix?: string }) {
   return <span className={cn("font-mono font-semibold", value > 0 ? "text-emerald-400" : value < 0 ? "text-red-400" : "text-muted-foreground")}>{value > 0 ? "+" : ""}{value.toFixed(1)}{suffix}</span>;
 }
 
+function MetricComparison({ label, before, after }: { label: string; before: number; after: number }) {
+  const delta = after - before;
+  const percent = percentChange(before, delta);
+  const direction = delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-muted-foreground";
+  return <div className="min-w-0 rounded-xl border border-border bg-background/40 p-3">
+    <p className="text-[10px] font-medium text-muted-foreground">{label}</p>
+    <p className="mt-1 truncate font-mono text-sm font-semibold" title={`${before} to ${after}`}>{formatNumber(before)} <span className="text-muted-foreground">→</span> {formatNumber(after)}</p>
+    <p className={cn("mt-1 font-mono text-xs font-semibold", direction)}>{delta > 0 ? "+" : ""}{formatNumber(delta)} <span className="font-sans font-normal">({percent > 0 ? "+" : ""}{percent.toFixed(2)}%)</span></p>
+  </div>;
+}
+
 function Metric({ label, value, detail, icon: Icon }: { label: string; value: string; detail: string; icon: typeof Activity }) {
   return <div className="space-y-2 p-5"><div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Icon className="size-3.5 text-primary" />{label}</div><p className="font-mono text-2xl font-semibold tracking-tight">{value}</p><p className="truncate text-xs text-muted-foreground">{detail}</p></div>;
 }
@@ -132,8 +143,8 @@ function ItemPreview({ recommendation }: { recommendation: UpgradeRecommendation
 }
 
 function RecommendationCard({ recommendation, baseline, rank, league }: { recommendation: UpgradeRecommendation; baseline: Build["metrics"]; rank: number; league: string }) {
-  const dps = percentChange(baseline.totalDps, recommendation.changes.totalDps);
-  const ehp = percentChange(baseline.effectiveHitPool, recommendation.changes.effectiveHitPool);
+  const dps = percentChange(baseline.totalDps, recommendation.metrics.totalDps - baseline.totalDps);
+  const ehp = percentChange(baseline.effectiveHitPool, recommendation.metrics.effectiveHitPool - baseline.effectiveHitPool);
   const tradeHref = recommendation.item.tradeUrl ?? `/api/trade/item?league=${encodeURIComponent(league)}&item=${encodeURIComponent(recommendation.item.id)}`;
   return <Card className="gap-0 overflow-hidden border-white/[0.07] bg-card/90 py-0 shadow-[0_22px_55px_-42px_rgba(0,0,0,0.95)] transition-all hover:-translate-y-0.5 hover:border-primary/35">
     <CardHeader className="grid grid-cols-[auto_1fr_auto] items-start gap-3 border-b border-border/70 px-5 py-5">
@@ -142,7 +153,7 @@ function RecommendationCard({ recommendation, baseline, rank, league }: { recomm
       <Badge className="bg-primary text-primary-foreground">{formatPrice(recommendation.priceInChaos)}</Badge>
     </CardHeader>
     <CardContent className="space-y-4 p-5">
-      <div className="grid grid-cols-4 divide-x divide-border rounded-xl border border-border bg-background/40">{[["Damage", <Delta key="dps" value={dps} />], ["EHP", <Delta key="ehp" value={ehp} />], ["Phys. hit", <Delta key="phys" value={percentChange(baseline.physicalMaxHit, recommendation.changes.physicalMaxHit)} />], ["Score", <span key="score" className="font-mono font-semibold">{recommendation.score.toFixed(1)}</span>]].map(([label, value]) => <div key={label as string} className="space-y-1 px-3 py-2"><p className="text-[10px] text-muted-foreground">{label}</p>{value}</div>)}</div>
+      <div className="grid grid-cols-4 divide-x divide-border rounded-xl border border-border bg-background/40">{[["Damage", <Delta key="dps" value={dps} />], ["EHP", <Delta key="ehp" value={ehp} />], ["Phys. hit", <Delta key="phys" value={percentChange(baseline.physicalMaxHit, recommendation.metrics.physicalMaxHit - baseline.physicalMaxHit)} />], ["Score", <span key="score" className="font-mono font-semibold">{recommendation.score.toFixed(1)}</span>]].map(([label, value]) => <div key={label as string} className="space-y-1 px-3 py-2"><p className="text-[10px] text-muted-foreground">{label}</p>{value}</div>)}</div>
       <div className="flex items-center justify-between gap-3"><p className="text-[10px] text-muted-foreground">Manually supplied {recommendation.item.baseType}, verified by PoB.</p><Button variant="link" size="sm" asChild className="h-auto shrink-0 px-0 text-xs"><a href={tradeHref} target="_blank" rel="noopener noreferrer" aria-label={`Open the official Path of Exile trade site for ${league}`}>Open PoE Trade<ExternalLink /></a></Button></div>
       <div className="flex flex-wrap gap-2">{recommendation.item.modifiers.slice(0, 2).map((mod) => <Badge variant="secondary" key={mod.label} className="font-normal text-muted-foreground">{mod.label}</Badge>)}</div>
       <Alert className="border-primary/20 bg-primary/5"><Sparkles className="text-primary" /><AlertTitle className="text-sm text-primary">Why this one stands out</AlertTitle><AlertDescription>{recommendation.explanation}</AlertDescription></Alert>
@@ -151,17 +162,22 @@ function RecommendationCard({ recommendation, baseline, rank, league }: { recomm
 }
 
 function CandidateEvaluationCard({ evaluation, baseline }: { evaluation: CandidateEvaluation; baseline: Build["metrics"] }) {
-  const dps = percentChange(baseline.totalDps, evaluation.changes.totalDps);
-  const ehp = percentChange(baseline.effectiveHitPool, evaluation.changes.effectiveHitPool);
-  const physical = percentChange(baseline.physicalMaxHit, evaluation.changes.physicalMaxHit);
-  return <Card className={cn("gap-0 overflow-hidden border-border/80 bg-card/70 py-0 shadow-none", evaluation.qualified ? "border-emerald-500/30" : "border-amber-500/25")}>
+  const verdict = {
+    upgrade: { label: "Upgrade", card: "border-emerald-500/30", badge: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300" },
+    downgrade: { label: "Downgrade", card: "border-red-500/30", badge: "border-red-500/35 bg-red-500/10 text-red-300" },
+    mixed: { label: "Mixed trade-off", card: "border-amber-500/30", badge: "border-amber-500/35 bg-amber-500/10 text-amber-200" },
+    unchanged: { label: "No measurable change", card: "border-border", badge: "border-border bg-muted/40 text-muted-foreground" },
+  }[evaluation.verdict];
+  return <Card className={cn("gap-0 overflow-hidden bg-card/70 py-0 shadow-none", verdict.card)}>
     <CardHeader className="flex flex-row items-start justify-between gap-3 border-b border-border/70 px-5 py-4">
       <div className="min-w-0"><CardDescription className="text-xs font-medium text-primary">{slotLabels[evaluation.slot]} · PoB result</CardDescription><CardTitle className="mt-1 truncate font-heading text-base text-amber-100">{evaluation.item.name}</CardTitle><p className="mt-1 text-xs text-muted-foreground">Compared with {evaluation.currentItem.name}</p></div>
-      <Badge variant={evaluation.qualified ? "default" : "secondary"}>{evaluation.qualified ? "Worth considering" : "Not an upgrade"}</Badge>
+      <div className="flex shrink-0 flex-col items-end gap-1.5"><Badge variant="outline" className={verdict.badge}>{verdict.label}</Badge><span className="text-[10px] text-muted-foreground">{evaluation.qualified ? "Selected for your goal" : "Not selected for your goal"}</span></div>
     </CardHeader>
     <CardContent className="space-y-3 p-5">
-      <div className="grid grid-cols-4 divide-x divide-border rounded-xl border border-border bg-background/40">{[["Damage", <Delta key="dps" value={dps} />], ["EHP", <Delta key="ehp" value={ehp} />], ["Phys. hit", <Delta key="phys" value={physical} />], ["Score", <span key="score" className="font-mono font-semibold">{evaluation.score.toFixed(2)}</span>]].map(([label, value]) => <div key={label as string} className="min-w-0 space-y-1 px-2 py-2 sm:px-3"><p className="text-[10px] text-muted-foreground">{label}</p><div className="truncate text-sm">{value}</div></div>)}</div>
-      {!evaluation.qualified && <Alert className="border-amber-500/25 bg-amber-500/5"><PackageSearch className="text-amber-300" /><AlertTitle>Why it wasn&apos;t selected</AlertTitle><AlertDescription>{evaluation.rejectionReasons.join(" ")}</AlertDescription></Alert>}
+      <div className="grid gap-2 sm:grid-cols-3"><MetricComparison label="Combined DPS" before={baseline.totalDps} after={evaluation.metrics.totalDps} /><MetricComparison label="Effective hit pool" before={baseline.effectiveHitPool} after={evaluation.metrics.effectiveHitPool} /><MetricComparison label="Physical max hit" before={baseline.physicalMaxHit} after={evaluation.metrics.physicalMaxHit} /></div>
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/25 px-3 py-2 text-xs"><span className="text-muted-foreground">Goal-weighted score</span><span className="font-mono font-semibold">{evaluation.score.toFixed(2)}</span></div>
+      {evaluation.verdict === "unchanged" && <Alert className="border-sky-500/25 bg-sky-500/5"><PackageSearch className="text-sky-300" /><AlertTitle>PoB returned identical results</AlertTitle><AlertDescription>This is not being treated as a downgrade. Check that the candidate can be equipped in the active item set and that PoB&apos;s active skill and configuration are the ones you expect.</AlertDescription></Alert>}
+      {!evaluation.qualified && <Alert className="border-amber-500/25 bg-amber-500/5"><PackageSearch className="text-amber-300" /><AlertTitle>Why it wasn&apos;t selected for this goal</AlertTitle><AlertDescription>{evaluation.rejectionReasons.join(" ")}</AlertDescription></Alert>}
     </CardContent>
   </Card>;
 }
@@ -500,11 +516,11 @@ export default function OptimizerDashboard() {
     </section>
 
     {result && build && <section id="results" className="mx-auto max-w-7xl space-y-5 px-4 py-16 sm:px-6">
-      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 text-emerald-300"><CheckCircle2 className="size-3" />Verified by Path of Building · {result.evaluatedCandidates} checked</Badge><h2 className="font-heading text-4xl font-semibold">Here&apos;s what&apos;s worth buying</h2><p className="mt-2 text-sm text-muted-foreground">Calculated by {result.engineVersion ?? "Path of Building"}. Only genuine improvements are ranked.</p></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
+      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 text-emerald-300"><CheckCircle2 className="size-3" />Verified by Path of Building · {result.evaluatedCandidates} checked</Badge><h2 className="font-heading text-4xl font-semibold">Here&apos;s what PoB calculated</h2><p className="mt-2 text-sm text-muted-foreground">Calculated by {result.engineVersion ?? "Path of Building"}. Upgrade verdicts and recommendation eligibility are shown separately.</p></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
       {result.combinations[0] && <Card className="overflow-hidden border-primary/35 bg-gradient-to-br from-primary/10 via-card to-card shadow-[0_24px_65px_-48px_rgba(232,169,70,0.5)]"><CardHeader className="border-b border-primary/15"><Badge className="mb-2 w-fit gap-1"><Sparkles className="size-3" />Best combination</Badge><CardTitle className="font-heading text-2xl">{result.combinations[0].recommendations.map((item) => item.item.name).join(" + ")}</CardTitle><CardDescription>{result.combinations[0].explanation}</CardDescription></CardHeader><CardContent className="grid gap-4 pt-6 sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">Total cost</p><p className="mt-1 font-mono text-xl font-semibold">{formatPrice(result.combinations[0].priceInChaos)}</p></div><div><p className="text-xs text-muted-foreground">Damage change</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.totalDps, result.combinations[0].changes.totalDps)} /></p></div><div><p className="text-xs text-muted-foreground">EHP change</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.effectiveHitPool, result.combinations[0].changes.effectiveHitPool)} /></p></div></CardContent></Card>}
       <div className="flex items-center justify-between pt-6"><div><p className="text-xs font-medium text-primary">Top picks</p><h3 className="font-heading text-2xl font-semibold">Best individual upgrades</h3></div><Badge variant="outline">{result.recommendations.length} selected</Badge></div>
-      {result.recommendations.length > 0 ? <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={`${recommendation.slot}-${recommendation.item.id}`} recommendation={recommendation} baseline={result.baselineMetrics} rank={index + 1} league={league} />)}</div> : <Alert className="border-amber-500/25 bg-amber-500/5"><PackageSearch className="text-amber-300" /><AlertTitle>No verified upgrades found</AlertTitle><AlertDescription>Path of Building recalculated {result.evaluatedCandidates} compatible pasted candidates, but none improved the selected goal within this budget. Add more candidates, increase the budget, or change the goal.</AlertDescription></Alert>}
-      {(result.candidateEvaluations?.length ?? 0) > 0 && <div className="space-y-4 pt-8"><div><p className="text-xs font-medium text-primary">Every item we checked</p><h3 className="font-heading text-2xl font-semibold">See exactly what PoB found</h3><p className="mt-1 text-sm text-muted-foreground">We keep the recalculated changes for every item, including the ones that didn&apos;t make the shortlist.</p></div><div className="grid gap-4 lg:grid-cols-2">{result.candidateEvaluations.map((evaluation) => <CandidateEvaluationCard key={`${evaluation.slot}-${evaluation.item.id}`} evaluation={evaluation} baseline={result.baselineMetrics} />)}</div></div>}
+      {result.recommendations.length > 0 ? <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={`${recommendation.slot}-${recommendation.item.id}`} recommendation={recommendation} baseline={result.baselineMetrics} rank={index + 1} league={league} />)}</div> : <Alert className="border-amber-500/25 bg-amber-500/5"><PackageSearch className="text-amber-300" /><AlertTitle>No candidates matched the selected goal</AlertTitle><AlertDescription>Path of Building recalculated {result.evaluatedCandidates} compatible pasted candidates. Review each before-and-after result below to see whether it was an upgrade, downgrade, mixed trade-off, or an unchanged evaluation.</AlertDescription></Alert>}
+      {(result.candidateEvaluations?.length ?? 0) > 0 && <div className="space-y-4 pt-8"><div><p className="text-xs font-medium text-primary">Every item we checked</p><h3 className="font-heading text-2xl font-semibold">See exactly what PoB found</h3><p className="mt-1 text-sm text-muted-foreground">Each card shows the actual baseline, recalculated value, raw difference, and percentage. Its verdict is independent from whether it qualified for your selected goal.</p></div><div className="grid gap-4 lg:grid-cols-2">{result.candidateEvaluations.map((evaluation) => <CandidateEvaluationCard key={`${evaluation.slot}-${evaluation.item.id}`} evaluation={evaluation} baseline={result.baselineMetrics} />)}</div></div>}
     </section>}
 
     <footer className="border-t border-border"><div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-8 text-xs text-muted-foreground sm:flex-row sm:justify-between sm:px-6"><span>PoE Upgrade Optimizer</span><span>Path of Exile is a trademark of Grinding Gear Games. This project is not affiliated with GGG.</span></div></footer>

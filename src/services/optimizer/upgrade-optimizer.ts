@@ -1,11 +1,27 @@
-import { BuildMetrics, CandidateEvaluation, OptimizationGoal, OptimizationRequest, OptimizationResult, UpgradeCombination, UpgradeRecommendation } from "@/models";
-import { metricKeys, percentChange, toChaos, zeroMetrics } from "@/lib/metrics";
+import { BuildMetrics, CandidateEvaluation, CandidateVerdict, OptimizationGoal, OptimizationRequest, OptimizationResult, UpgradeCombination, UpgradeRecommendation } from "@/models";
+import { metricKeys, percentChange, subtractMetrics, toChaos, zeroMetrics } from "@/lib/metrics";
 import { PobCalculationService } from "@/services/pob/pob-calculation-service";
 import { TradeMarketService } from "@/services/trade/trade-market-service";
 
 export const SCORE_WEIGHTS: Record<OptimizationGoal, { offense: number; defense: number }> = {
   dps: { offense: 1, defense: 0.08 }, survivability: { offense: 0.08, defense: 1 }, balanced: { offense: 0.55, defense: 0.45 },
 };
+
+const MEANINGFUL_PERCENT = 0.005;
+
+export function classifyCandidateVerdict(base: BuildMetrics, change: BuildMetrics): CandidateVerdict {
+  const offense = percentChange(base.totalDps, change.totalDps);
+  const defense = percentChange(base.effectiveHitPool, change.effectiveHitPool) * 0.55
+    + percentChange(base.physicalMaxHit, change.physicalMaxHit) * 0.15
+    + percentChange(base.elementalMaxHit, change.elementalMaxHit) * 0.15
+    + percentChange(base.chaosMaxHit, change.chaosMaxHit) * 0.15;
+  const signals = [offense, defense].filter((value) => Math.abs(value) >= MEANINGFUL_PERCENT);
+  if (!signals.length) return "unchanged";
+  if (signals.every((value) => value > 0)) return "upgrade";
+  if (signals.every((value) => value < 0)) return "downgrade";
+  return "mixed";
+}
+
 export class UpgradeOptimizer {
   constructor(private pob: PobCalculationService, private trade: TradeMarketService) {}
   private defensiveChange(base: BuildMetrics, change: BuildMetrics) {
@@ -37,6 +53,10 @@ export class UpgradeOptimizer {
     const dpsPercent = percentChange(base.totalDps, change.totalDps);
     const defense = this.defensiveChange(base, change);
     const reasons: string[] = [];
+    const unchanged = metricKeys.every((key) => Math.abs(change[key]) < 1e-9);
+    if (unchanged) {
+      reasons.push("Path of Building returned identical tracked metrics before and after the replacement. The item may not affect the active skill and configuration, or PoB may not have equipped it in the active item set.");
+    }
     if (goal === "dps" && change.totalDps <= 0) {
       reasons.push(`DPS mode requires a gain, but PoB calculated ${dpsPercent.toFixed(2)}% DPS.`);
     }
@@ -47,7 +67,7 @@ export class UpgradeOptimizer {
       if (change.totalDps < 0) reasons.push(`Balanced mode does not allow a DPS loss; PoB calculated ${dpsPercent.toFixed(2)}% DPS.`);
       if (change.totalDps === 0 && defense <= 0) reasons.push("Neither DPS nor the weighted defensive metrics improved.");
     }
-    if (score <= 0) reasons.push(`The selected goal produced a non-positive score of ${score.toFixed(2)}.`);
+    if (score <= 0 && !unchanged) reasons.push(`The selected goal produced a non-positive score of ${score.toFixed(2)}.`);
     return reasons;
   }
   async optimize(request: OptimizationRequest): Promise<OptimizationResult> {
@@ -62,11 +82,13 @@ export class UpgradeOptimizer {
     for (const simulation of batch.simulations) {
       const item = simulation.item;
       if (request.requireVerified && simulation.verification !== "pob") continue;
+      const changes = subtractMetrics(simulation.metrics, batch.baseline);
+      const normalizedSimulation = { ...simulation, changes };
       const priceInChaos = toChaos(await this.trade.estimatePrice(item));
-      const score = this.score(batch.baseline, simulation.changes, request.goal, priceInChaos);
-      const rejectionReasons = this.rejectionReasons(batch.baseline, simulation.changes, request.goal, score);
-      const partial = { ...simulation, currentItem: request.build.equipment[item.slot], priceInChaos, score };
-      candidateEvaluations.push({ ...partial, qualified: rejectionReasons.length === 0, rejectionReasons });
+      const score = this.score(batch.baseline, changes, request.goal, priceInChaos);
+      const rejectionReasons = this.rejectionReasons(batch.baseline, changes, request.goal, score);
+      const partial = { ...normalizedSimulation, currentItem: request.build.equipment[item.slot], priceInChaos, score };
+      candidateEvaluations.push({ ...partial, verdict: classifyCandidateVerdict(batch.baseline, changes), qualified: rejectionReasons.length === 0, rejectionReasons });
       if (rejectionReasons.length) continue;
       recommendations.push({ ...partial, explanation: this.explain(batch.baseline, partial) });
     }

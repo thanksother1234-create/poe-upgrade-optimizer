@@ -35,6 +35,12 @@ function activeItemSetId(xml) {
   return itemsTag.match(/\bactiveItemSet="([^"]+)"/)?.[1] ?? "1";
 }
 
+function usesSecondWeaponSet(xml, itemSetId) {
+  const itemSetPattern = new RegExp(`<ItemSet\\b([^>]*\\bid="${escapeRegex(itemSetId)}"[^>]*)>`);
+  const attributes = xml.match(itemSetPattern)?.[1] ?? "";
+  return /\buseSecondWeaponSet="(?:true|1)"/i.test(attributes);
+}
+
 function nextItemId(xml) {
   const ids = [...xml.matchAll(/<Item\b[^>]*\bid="(\d+)"/g)].map((match) => Number(match[1]));
   return Math.max(0, ...ids) + 1;
@@ -76,11 +82,15 @@ export function replaceItemsInBuildXml(buildXml, replacements) {
   if (!Array.isArray(replacements) || !replacements.length) return buildXml;
 
   const itemSetId = activeItemSetId(buildXml);
+  const secondWeaponSet = usesSecondWeaponSet(buildXml, itemSetId);
   let xml = buildXml;
   let itemId = nextItemId(xml);
   for (const replacement of replacements) {
-    const slotName = SLOT_NAMES[replacement?.slot];
-    if (!slotName || typeof replacement.rawText !== "string" || !replacement.rawText.trim()) throw new Error("Each replacement needs a supported slot and raw item text.");
+    const regularSlotName = SLOT_NAMES[replacement?.slot];
+    if (!regularSlotName || typeof replacement.rawText !== "string" || !replacement.rawText.trim()) throw new Error("Each replacement needs a supported slot and raw item text.");
+    const slotName = secondWeaponSet && (replacement?.slot === "weapon" || replacement?.slot === "offhand")
+      ? `${regularSlotName} Swap`
+      : regularSlotName;
     xml = addItem(xml, itemId, replacement.rawText);
     xml = assignSlot(xml, itemSetId, slotName, itemId);
     itemId += 1;

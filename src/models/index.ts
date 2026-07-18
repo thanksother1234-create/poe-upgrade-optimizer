@@ -28,6 +28,7 @@ export interface BuildMetrics {
 }
 export interface Build { id: string; character: Character; equipment: Equipment; metrics: BuildMetrics; sourceXml?: string }
 export type CalculationVerification = "estimated" | "pob";
+export type CandidateVerdict = "upgrade" | "downgrade" | "mixed" | "unchanged";
 export interface SimulationResult {
   slot: EquipmentSlot;
   item: TradeItem;
@@ -40,6 +41,7 @@ export interface CandidateEvaluation extends SimulationResult {
   currentItem: Item;
   priceInChaos: number;
   score: number;
+  verdict: CandidateVerdict;
   qualified: boolean;
   rejectionReasons: string[];
 }

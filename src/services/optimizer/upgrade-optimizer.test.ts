@@ -1,14 +1,53 @@
 import { describe, expect, it } from "vitest";
+import { zeroMetrics } from "@/lib/metrics";
 import { mockBuild } from "@/mocks/build";
 import { OptimizationGoal } from "@/models";
-import { MockPobCalculationService } from "@/services/pob/pob-calculation-service";
+import { MockPobCalculationService, PobCalculationService } from "@/services/pob/pob-calculation-service";
 import { MockTradeMarketService } from "@/services/trade/trade-market-service";
-import { UpgradeOptimizer } from "./upgrade-optimizer";
+import { classifyCandidateVerdict, UpgradeOptimizer } from "./upgrade-optimizer";
 
 const optimizer = new UpgradeOptimizer(new MockPobCalculationService(), new MockTradeMarketService());
 const run = (goal: OptimizationGoal, amount = 5) => optimizer.optimize({ build: mockBuild, budget: { amount, currency: "divine" }, goal, allowedSlots: ["weapon", "ring1", "ring2", "boots", "amulet"], league: "Standard" });
 
 describe("UpgradeOptimizer", () => {
+  it("classifies the actual PoB outcome independently from recommendation eligibility", () => {
+    const upgrade = zeroMetrics(); upgrade.totalDps = 10_000;
+    const downgrade = zeroMetrics(); downgrade.totalDps = -10_000;
+    const mixed = zeroMetrics(); mixed.totalDps = 10_000; mixed.effectiveHitPool = -1_000;
+    expect(classifyCandidateVerdict(mockBuild.metrics, upgrade)).toBe("upgrade");
+    expect(classifyCandidateVerdict(mockBuild.metrics, downgrade)).toBe("downgrade");
+    expect(classifyCandidateVerdict(mockBuild.metrics, mixed)).toBe("mixed");
+    expect(classifyCandidateVerdict(mockBuild.metrics, zeroMetrics())).toBe("unchanged");
+  });
+
+  it("derives comparison deltas from PoB's absolute metrics", async () => {
+    const inconsistentPob: PobCalculationService = {
+      importBuild: async () => structuredClone(mockBuild),
+      calculateBuild: async (build) => structuredClone(build.metrics),
+      simulateItemReplacement: async () => { throw new Error("not used"); },
+      simulateItemReplacements: async (build, items) => ({
+        baseline: structuredClone(build.metrics),
+        simulations: items.slice(0, 1).map((item) => ({
+          slot: item.slot,
+          item,
+          metrics: { ...build.metrics, totalDps: build.metrics.totalDps + 100_000 },
+          changes: zeroMetrics(),
+          verification: "pob" as const,
+        })),
+        verification: "pob" as const,
+      }),
+    };
+    const result = await new UpgradeOptimizer(inconsistentPob, new MockTradeMarketService()).optimize({
+      build: mockBuild,
+      budget: { amount: 5, currency: "divine" },
+      goal: "dps",
+      allowedSlots: ["weapon"],
+      league: "Standard",
+    });
+    expect(result.candidateEvaluations[0].changes.totalDps).toBe(100_000);
+    expect(result.candidateEvaluations[0].verdict).toBe("upgrade");
+  });
+
   it("never exceeds the total budget", async () => { const result = await run("balanced", 3); expect(result.combinations.every((combo) => combo.priceInChaos <= result.budgetInChaos)).toBe(true); });
   it("never combines multiple items for the same slot", async () => { const result = await run("balanced"); expect(result.combinations.every((combo) => new Set(combo.recommendations.map((r) => r.slot)).size === combo.recommendations.length)).toBe(true); });
   it("DPS mode favors the highest damage improvement", async () => { const result = await run("dps"); expect(result.recommendations[0].item.id).toBe("w1"); });
