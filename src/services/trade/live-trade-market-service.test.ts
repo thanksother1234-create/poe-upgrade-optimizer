@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockBuild } from "@/mocks/build";
-import { LiveTradeMarketService } from "./live-trade-market-service";
+import { LiveTradeMarketService, normalizePoeUserAgent } from "./live-trade-market-service";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -8,6 +8,7 @@ describe("LiveTradeMarketService", () => {
   it("fetches, decodes, and maps a real trade listing shape", async () => {
     const rawText = "Item Class: Rings\r\nRarity: RARE\r\nDoom Loop\r\nOpal Ring\r\n--------\r\n+70 to maximum Life";
     const fetchMock = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("user-agent")).toBe("OAuth TestAgent/1.0");
       if (init?.method === "POST") {
         const request = JSON.parse(String(init.body)) as { query: { filters: { type_filters: { filters: { category: { option: string } } } } } };
         expect(request.query.filters.type_filters.filters.category.option).toBe("accessory.ring");
@@ -39,5 +40,12 @@ describe("LiveTradeMarketService", () => {
     });
     expect(items[0].modifiers[0].label).toBe("+70 to maximum Life");
     expect(items[0].tradeUrl).toContain("/trade/search/Standard/search123");
+  });
+
+  it("normalizes the required OAuth User-Agent prefix", () => {
+    expect(normalizePoeUserAgent("PoEUpgradeOptimizer/0.2 (contact: owner@example.com)"))
+      .toBe("OAuth PoEUpgradeOptimizer/0.2 (contact: owner@example.com)");
+    expect(normalizePoeUserAgent("OAuth ExistingClient/1.0 (contact: owner@example.com)"))
+      .toBe("OAuth ExistingClient/1.0 (contact: owner@example.com)");
   });
 });

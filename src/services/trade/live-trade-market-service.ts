@@ -6,6 +6,7 @@ import { createTradeSiteUrl } from "@/services/trade/trade-search-service";
 
 const FETCH_BATCH_SIZE = 10;
 const DEFAULT_ITEMS_PER_SLOT = 3;
+const DEFAULT_USER_AGENT = "OAuth PoEUpgradeOptimizer/0.2 (contact: local-development)";
 
 type TradeModifier = string | { description?: unknown };
 
@@ -45,6 +46,11 @@ export class LiveTradeError extends Error {
 }
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
+
+export function normalizePoeUserAgent(value?: string) {
+  const userAgent = value?.trim() || DEFAULT_USER_AGENT;
+  return /^OAuth\s+/i.test(userAgent) ? userAgent : `OAuth ${userAgent}`;
+}
 
 function parseModifier(modifier: TradeModifier): string | null {
   if (typeof modifier === "string") return modifier;
@@ -104,11 +110,14 @@ function mapListing(entry: TradeFetchEntry, slot: EquipmentSlot, league: string,
 
 export class LiveTradeMarketService implements TradeMarketService {
   private readonly cache = new Map<string, Promise<TradeItem[]>>();
+  private readonly userAgent: string;
 
   constructor(
-    private readonly userAgent = process.env.POE_USER_AGENT ?? "PoEUpgradeOptimizer/0.2 (contact: local-development)",
+    userAgent = process.env.POE_USER_AGENT,
     private readonly itemsPerSlot = DEFAULT_ITEMS_PER_SLOT,
-  ) {}
+  ) {
+    this.userAgent = normalizePoeUserAgent(userAgent);
+  }
 
   async searchUpgrades(build: Build, slot: EquipmentSlot, budget: CurrencyAmount, league: string): Promise<TradeItem[]> {
     const currentItem = build.equipment[slot];
@@ -147,6 +156,7 @@ export class LiveTradeMarketService implements TradeMarketService {
       cache: "no-store",
     });
     if (searchResponse.status === 429) throw new LiveTradeError("The Path of Exile trade API rate limit was reached. Wait a moment and try again.", 429);
+    if (searchResponse.status === 403) throw new LiveTradeError("Path of Exile rejected the trade search identity. Verify that POE_USER_AGENT contains a real contact email and redeploy the app.", 502);
     if (!searchResponse.ok) throw new LiveTradeError(`Path of Exile trade search returned ${searchResponse.status}.`);
 
     const searchPayload = await searchResponse.json() as TradeSearchResponse;
