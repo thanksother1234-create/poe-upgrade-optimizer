@@ -8,8 +8,10 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build",
-    "start": "vinext start",
+    "build": "vite build",
+    "build:vinext": "vinext build",
+    "start": "vite preview",
+    "start:vinext": "vinext start",
     "dev:next": "next dev",
     "build:next": "next build",
     "check:vinext": "vinext check",
@@ -31,6 +33,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -38,6 +41,7 @@
     "@vitejs/plugin-rsc": "^0.5.28",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "nitro": "^3.0.260610-beta",
     "react-server-dom-webpack": "^19.2.6",
     "tailwindcss": "^4",
     "typescript": "^5",

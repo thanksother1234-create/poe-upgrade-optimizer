@@ -1,9 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowRight, CheckCircle2, CircleDollarSign, DatabaseZap, Gauge,
-  HeartPulse, Import, Loader2, LockKeyhole, PackageSearch, Scale, Shield,
+  ExternalLink, HeartPulse, Import, Loader2, LockKeyhole, PackageSearch, Scale, Shield,
   Sparkles, Sword, WandSparkles, Wifi, WifiOff, Zap,
 } from "lucide-react";
 import { Build, EQUIPMENT_SLOTS, EquipmentSlot, LeagueResponse, OptimizationGoal, OptimizationResult, PoeLeague, UpgradeRecommendation } from "@/models";
@@ -25,6 +26,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const pobService = new MvpPobCalculationService();
 const optimizer = new UpgradeOptimizer(pobService, new MockTradeMarketService());
@@ -61,17 +63,43 @@ function LeagueSelect({ leagues, value, currentLeague, loading, onChange }: { le
   </Select>;
 }
 
-function RecommendationCard({ recommendation, build, rank }: { recommendation: UpgradeRecommendation; build: Build; rank: number }) {
+function ItemPreview({ recommendation }: { recommendation: UpgradeRecommendation }) {
+  return <TooltipProvider delayDuration={160}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="group grid h-20 w-16 place-items-center rounded-md border border-primary/20 bg-background/65 p-1 outline-none transition-colors hover:border-primary/60 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30" aria-label={`View all stats for ${recommendation.item.name}`}>
+          <Image src={recommendation.item.imageUrl} alt={`${recommendation.item.baseType} inventory artwork`} width={64} height={80} className="max-h-[4.5rem] w-auto object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] transition-transform group-hover:scale-105" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={10} className="block w-80 max-w-[calc(100vw-2rem)] items-stretch gap-0 overflow-hidden border border-amber-500/35 bg-[#0b0a08] p-0 text-foreground shadow-2xl">
+        <div className="border-b border-amber-500/25 bg-amber-500/5 px-4 py-3 text-center">
+          <p className="font-heading text-base font-semibold text-amber-200">{recommendation.item.name}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{recommendation.item.baseType}</p>
+        </div>
+        <div className="space-y-1.5 px-4 py-3 text-center text-[11px] leading-4 text-sky-300">
+          {recommendation.item.modifiers.map((modifier, index) => <p key={`${modifier.label}-${index}`}>{modifier.label}</p>)}
+        </div>
+        <div className="flex items-center justify-between border-t border-border/70 bg-background/50 px-4 py-2 font-mono text-[10px]">
+          <span className="text-muted-foreground">LISTED ESTIMATE</span><span className="text-primary">{formatPrice(recommendation.priceInChaos)}</span>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>;
+}
+
+function RecommendationCard({ recommendation, build, rank, league }: { recommendation: UpgradeRecommendation; build: Build; rank: number; league: string }) {
   const dps = percentChange(build.metrics.totalDps, recommendation.changes.totalDps);
   const ehp = percentChange(build.metrics.effectiveHitPool, recommendation.changes.effectiveHitPool);
+  const tradeHref = `/api/trade/item?league=${encodeURIComponent(league)}&item=${encodeURIComponent(recommendation.item.id)}`;
   return <Card className="gap-0 overflow-hidden border-border/80 bg-card/80 py-0 shadow-none transition-colors hover:border-primary/35">
     <CardHeader className="grid grid-cols-[auto_1fr_auto] items-start gap-3 border-b border-border/70 px-5 py-5">
-      <Badge variant="outline" className="font-mono text-muted-foreground">#{rank.toString().padStart(2, "0")}</Badge>
+      <div className="flex flex-col items-center gap-2"><Badge variant="outline" className="font-mono text-muted-foreground">#{rank.toString().padStart(2, "0")}</Badge><ItemPreview recommendation={recommendation} /></div>
       <div><CardDescription className="font-mono text-[10px] uppercase tracking-widest text-primary">{slotLabels[recommendation.slot]}</CardDescription><CardTitle className="mt-1 font-heading text-xl text-amber-200">{recommendation.item.name}</CardTitle><p className="mt-1 text-xs text-muted-foreground">Replaces {recommendation.currentItem.name}</p></div>
       <Badge className="bg-primary text-primary-foreground">{formatPrice(recommendation.priceInChaos)}</Badge>
     </CardHeader>
     <CardContent className="space-y-4 p-5">
       <div className="grid grid-cols-4 divide-x divide-border rounded-md border border-border bg-background/40">{[["DPS", <Delta key="dps" value={dps} />], ["EHP", <Delta key="ehp" value={ehp} />], ["PHYS", <Delta key="phys" value={percentChange(build.metrics.physicalMaxHit, recommendation.changes.physicalMaxHit)} />], ["SCORE", <span key="score" className="font-mono font-semibold">{recommendation.score.toFixed(1)}</span>]].map(([label, value]) => <div key={label as string} className="space-y-1 px-3 py-2"><p className="font-mono text-[9px] text-muted-foreground">{label}</p>{value}</div>)}</div>
+      <div className="flex items-center justify-between gap-3"><p className="text-[10px] text-muted-foreground">Searches {recommendation.item.baseType} listings in {league}.</p><Button variant="link" size="sm" asChild className="h-auto shrink-0 px-0 text-xs"><a href={tradeHref} target="_blank" rel="noopener noreferrer" aria-label={`Find ${recommendation.item.baseType} listings on the official Path of Exile trade site`}>Open trade search<ExternalLink /></a></Button></div>
       <div className="flex flex-wrap gap-2">{recommendation.item.modifiers.slice(0, 2).map((mod) => <Badge variant="secondary" key={mod.label} className="font-normal text-muted-foreground">{mod.label}</Badge>)}</div>
       <Alert className="border-primary/20 bg-primary/5"><Sparkles className="text-primary" /><AlertTitle className="font-mono text-[10px] tracking-wider text-primary">WHY THIS UPGRADE</AlertTitle><AlertDescription>{recommendation.explanation}</AlertDescription></Alert>
     </CardContent>
@@ -159,7 +187,7 @@ export default function OptimizerDashboard() {
       <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 font-mono text-emerald-300"><CheckCircle2 className="size-3" />OPTIMIZATION COMPLETE</Badge><h2 className="font-heading text-4xl font-semibold">Best upgrade paths</h2></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
       {result.combinations[0] && <Card className="overflow-hidden border-primary/35 bg-gradient-to-br from-primary/10 via-card to-card shadow-none"><CardHeader className="border-b border-primary/15"><Badge className="mb-2 w-fit gap-1"><Sparkles className="size-3" />BEST COMBINATION</Badge><CardTitle className="font-heading text-2xl">{result.combinations[0].recommendations.map((item) => item.item.name).join(" + ")}</CardTitle><CardDescription>{result.combinations[0].explanation}</CardDescription></CardHeader><CardContent className="grid gap-4 pt-6 sm:grid-cols-3"><div><p className="font-mono text-[10px] text-muted-foreground">TOTAL COST</p><p className="mt-1 font-mono text-xl font-semibold">{formatPrice(result.combinations[0].priceInChaos)}</p></div><div><p className="font-mono text-[10px] text-muted-foreground">DPS CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(build.metrics.totalDps, result.combinations[0].changes.totalDps)} /></p></div><div><p className="font-mono text-[10px] text-muted-foreground">EHP CHANGE</p><p className="mt-1 text-xl"><Delta value={percentChange(build.metrics.effectiveHitPool, result.combinations[0].changes.effectiveHitPool)} /></p></div></CardContent></Card>}
       <div className="flex items-center justify-between pt-6"><div><p className="font-mono text-[10px] tracking-widest text-primary">RANKED RESULTS</p><h3 className="font-heading text-2xl font-semibold">Best individual upgrades</h3></div><Badge variant="outline">{result.recommendations.length} qualified</Badge></div>
-      <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={recommendation.item.id} recommendation={recommendation} build={build} rank={index + 1} />)}</div>
+      <div className="grid gap-4 lg:grid-cols-2">{result.recommendations.slice(0, 6).map((recommendation, index) => <RecommendationCard key={recommendation.item.id} recommendation={recommendation} build={build} rank={index + 1} league={league} />)}</div>
     </section>}
 
     <footer className="border-t border-border"><div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-8 font-mono text-[9px] tracking-wider text-muted-foreground sm:flex-row sm:justify-between sm:px-6"><span>POE UPGRADE OPTIMIZER / MVP</span><span>Path of Exile is a trademark of Grinding Gear Games. This project is not affiliated with GGG.</span></div></footer>

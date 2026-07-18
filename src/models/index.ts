@@ -11,7 +11,7 @@ export interface CurrencyAmount { amount: number; currency: CurrencyUnit }
 export interface ItemModifier { label: string; value: number; metric?: keyof BuildMetrics }
 export type ItemRarity = "normal" | "magic" | "rare" | "unique";
 export interface Item { id: string; name: string; baseType: string; rarity: ItemRarity; modifiers: ItemModifier[] }
-export interface TradeItem extends Item { slot: EquipmentSlot; price: CurrencyAmount; metricChanges: Partial<BuildMetrics> }
+export interface TradeItem extends Item { slot: EquipmentSlot; imageUrl: string; price: CurrencyAmount; metricChanges: Partial<BuildMetrics> }
 export type Equipment = Record<EquipmentSlot, Item>;
 export interface Character { name: string; className: string; ascendancy: string; level: number; mainSkill: string; league: string }
 export interface BuildMetrics {
