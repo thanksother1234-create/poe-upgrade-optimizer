@@ -1,3 +1,11 @@
+-- Path of Building initialisation may replace Lua's global arg table. Preserve the
+-- XML inputs before loading it so the worker always evaluates every requested build.
+local inputFiles = {}
+for index = 1, #arg do
+	inputFiles[index] = arg[index]
+end
+
+io.stdout:setvbuf("no")
 dofile("HeadlessWrapper.lua")
 
 local function numberOrZero(value)
@@ -45,14 +53,20 @@ local function metrics(output)
 	}
 end
 
-for index = 1, #arg do
-	local file = io.open(arg[index], "rb")
+for index, inputFile in ipairs(inputFiles) do
+	local file = io.open(inputFile, "rb")
 	if not file then
 		io.write("POE_ERROR\t", tostring(index - 1), "\tUnable to open build input.\n")
 	else
 		local xml = file:read("*a")
 		file:close()
-		local ok, errorMessage = pcall(loadBuildFromXML, xml, "optimizer-" .. tostring(index))
+		local ok, errorMessage = pcall(function()
+			loadBuildFromXML(xml, "optimizer-" .. tostring(index))
+			-- Let deferred calculation callbacks settle before metrics are read.
+			for _ = 1, 3 do
+				runCallback("OnFrame")
+			end
+		end)
 		local output = build and build.calcsTab and build.calcsTab.mainOutput
 		if not ok or not output then
 			io.write("POE_ERROR\t", tostring(index - 1), "\t", tostring(errorMessage or "Path of Building did not produce calculation output."), "\n")
@@ -64,4 +78,5 @@ for index = 1, #arg do
 			io.write("POE_METRICS\t", tostring(index - 1), "\t", table.concat(values, "\t"), "\n")
 		end
 	end
+	io.flush()
 end

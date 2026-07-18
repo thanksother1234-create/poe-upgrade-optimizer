@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity, ArrowRight, CheckCircle2, CircleDollarSign, ClipboardPaste, DatabaseZap, Gauge,
+  Activity, ArrowRight, Check, CheckCircle2, CircleDollarSign, ClipboardPaste, Copy, DatabaseZap, Gauge,
   ExternalLink, HeartPulse, Import, Loader2, LockKeyhole, PackageSearch, Scale, Search, Shield,
   Sparkles, Sword, Trash2, WandSparkles, Wifi, WifiOff, Zap,
 } from "lucide-react";
@@ -13,6 +13,7 @@ import { isPermanentLeague } from "@/services/league/league-service";
 import { formatNumber, formatPrice, percentChange } from "@/lib/metrics";
 import { isManualCandidateCompatible, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
 import { createTradeSiteUrl } from "@/services/trade/trade-search-service";
+import { createWeightedTradeSearch, formatWeightedSearchRecipe, type WeightedTradeSearchDraft } from "@/services/trade/weighted-search-service";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -139,6 +140,8 @@ export default function OptimizerDashboard() {
   const [candidatePrice, setCandidatePrice] = useState(1);
   const [candidateCurrency, setCandidateCurrency] = useState<"chaos" | "divine">("divine");
   const [candidateError, setCandidateError] = useState("");
+  const [copiedWeightedSlot, setCopiedWeightedSlot] = useState<EquipmentSlot | null>(null);
+  const [weightedSearchError, setWeightedSearchError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -153,6 +156,13 @@ export default function OptimizerDashboard() {
   }, []);
 
   const leagueGroups = useMemo(() => ({ challenge: leagues.filter((item) => !isPermanentLeague(item)).length, permanent: leagues.filter(isPermanentLeague).length }), [leagues]);
+  const weightedSearches = useMemo<Partial<Record<EquipmentSlot, WeightedTradeSearchDraft>>>(() => {
+    if (!build) return {};
+    return Object.fromEntries(slots.map((slot) => [
+      slot,
+      createWeightedTradeSearch(build, slot, goal, { amount: budget, currency }),
+    ]));
+  }, [budget, build, currency, goal, slots]);
   const importBuild = async () => {
     try {
       setImporting(true); setError(""); setOptimizationError("");
@@ -219,6 +229,19 @@ export default function OptimizerDashboard() {
     setCandidates((current) => current.filter((candidate) => candidate.id !== id));
     setResult(null); setCandidateError("");
   };
+  const copyWeightedTrade = async (slot: EquipmentSlot) => {
+    const draft = weightedSearches[slot];
+    if (!draft) return;
+
+    try {
+      setWeightedSearchError("");
+      await navigator.clipboard.writeText(formatWeightedSearchRecipe(draft, league));
+      setCopiedWeightedSlot(slot);
+      window.setTimeout(() => setCopiedWeightedSlot((current) => current === slot ? null : current), 3_000);
+    } catch {
+      setWeightedSearchError("PoE Trade opened, but the browser blocked clipboard access. Allow clipboard access and click the link again.");
+    }
+  };
   const prepareManualSearch = () => document.getElementById("manual-candidates")?.scrollIntoView({ behavior: "smooth" });
 
   return <main className="min-h-screen bg-background text-foreground">
@@ -271,17 +294,24 @@ export default function OptimizerDashboard() {
             <div className="space-y-4">
               <div>
                 <h3 className="font-heading text-lg font-semibold">1. Search on the official site</h3>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">Open the selected league, set the item category shown below, and cap the price at your {budget} {currency} budget. The link intentionally opens PoE&apos;s normal search form; this app does not call its private trade endpoint.</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">Each option uses the imported build and selected goal to create PoB-style Weighted Sum filters. Copy the recipe, open the selected league, add a <span className="text-foreground">Weighted Sum</span> stat group, and enter the listed weights.</p>
               </div>
+              <Alert className="border-primary/20 bg-primary/5"><LockKeyhole className="text-primary" /><AlertTitle>Why the trade page opens in two steps</AlertTitle><AlertDescription>Official trade links contain a search ID assigned only after PoE receives the query. The app does not send automated trade requests from its hosting network, so it copies the weighted query and opens the official form for you.</AlertDescription></Alert>
               <div className="grid gap-2 sm:grid-cols-2">
                 {slots.map((slot) => {
                   const currentItem = build.equipment[slot];
+                  const weightedSearch = weightedSearches[slot];
                   return <Card key={slot} className="gap-3 border-border/70 bg-background/45 p-4 shadow-none">
-                    <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-widest text-primary">{slotLabels[slot]}</p><p className="mt-1 font-heading text-sm font-semibold">{fixedTradeClassLabels[slot] ?? currentItem.itemClass ?? currentItem.baseType}</p><p className="mt-1 text-[10px] text-muted-foreground">Match the current item class</p></div><Badge variant="secondary" className="shrink-0">≤ {budget} {currency === "divine" ? "div" : "chaos"}</Badge></div>
-                    <Button variant="outline" size="sm" asChild className="w-full"><a href={createTradeSiteUrl(league)} target="_blank" rel="noopener noreferrer">Open {league} trade<ExternalLink /></a></Button>
+                    <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-[9px] uppercase tracking-widest text-primary">{slotLabels[slot]}</p><p className="mt-1 font-heading text-sm font-semibold">{fixedTradeClassLabels[slot] ?? currentItem.itemClass ?? currentItem.baseType}</p><p className="mt-1 text-[10px] capitalize text-muted-foreground">{weightedSearch?.profile ?? "build"} weighted profile</p></div><Badge variant="secondary" className="shrink-0">≤ {budget} {currency === "divine" ? "div" : "chaos"}</Badge></div>
+                    {weightedSearch && <div className="space-y-1.5 border-y border-border/60 py-3">
+                      {weightedSearch.options.slice(0, 4).map((option) => <div key={option.id} className="flex items-start justify-between gap-3 text-[10px]"><span className="min-w-0 leading-4 text-muted-foreground">{option.label}</span><span className="shrink-0 font-mono text-primary">×{option.weight}</span></div>)}
+                      {weightedSearch.options.length > 4 && <p className="font-mono text-[9px] text-muted-foreground">+ {weightedSearch.options.length - 4} more weighted stats</p>}
+                    </div>}
+                    <Button variant="outline" size="sm" asChild className="w-full"><a href={createTradeSiteUrl(league)} target="_blank" rel="noopener noreferrer" onClick={() => void copyWeightedTrade(slot)}>{copiedWeightedSlot === slot ? <Check /> : <Copy />}{copiedWeightedSlot === slot ? "Copied — trade opened" : "Copy weights & open trade"}<ExternalLink /></a></Button>
                   </Card>;
                 })}
               </div>
+              {weightedSearchError && <Alert variant="destructive"><AlertTitle>Weights not copied</AlertTitle><AlertDescription>{weightedSearchError}</AlertDescription></Alert>}
             </div>
 
             <div className="space-y-4">

@@ -5,7 +5,7 @@ PoE Upgrade Optimizer imports a Path of Building build, guides the user to colle
 ## Architecture
 
 - The Vinext/Vite/Next application runs on Vercel and owns the UI, league discovery, copied-item validation, and ranking.
-- The app links to the official league trade page but makes no automated requests to PoE's private trade-search endpoints. Users paste copied item text and its displayed price.
+- The app creates build- and goal-aware Weighted Sum recipes for each selected slot, opens the official league trade page, and makes no automated requests to PoE's private trade-search endpoints. Users enter the copied weights, then paste candidate item text and its displayed price for exact evaluation.
 - [`pob-engine`](./pob-engine) is a small authenticated Docker service containing LuaJIT and Path of Building `v2.65.0`. It evaluates the baseline and every user-supplied candidate.
 - Copied item text is inserted into the imported build XML. The worker then reads PoB's real `mainOutput` metrics; the TypeScript estimator is not used by the verified endpoint.
 
