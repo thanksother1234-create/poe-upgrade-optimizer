@@ -9,6 +9,13 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_SCENARIOS = 20;
+const MAX_TRADE_QUERY_BYTES = 256 * 1024;
+const TRADE_CACHE_TTL_MS = 30_000;
+const TRADE_CACHE_MAX_ENTRIES = 100;
+const TRADE_SEARCH_INTERVAL_MS = 2_100;
+const TRADE_FETCH_INTERVAL_MS = 400;
+const TRADE_FETCH_LIMIT = 10;
+const LEAGUE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 '()-]{0,79}$/;
 const SLOT_NAMES = {
   weapon: "Weapon 1",
   offhand: "Weapon 2",
@@ -29,6 +36,142 @@ const METRIC_NAMES = [
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const escapeXmlText = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function hasContactEmail(userAgent) {
+  return /^OAuth\s+\S+\/\S+\s+\(contact:\s*[^\s@()]+@[^\s@()]+\.[^\s@()]+\)$/i.test(userAgent);
+}
+
+function intervalScheduler(intervalMs) {
+  let tail = Promise.resolve();
+  let nextAvailableAt = 0;
+  return (operation) => {
+    const result = tail.then(async () => {
+      const delay = Math.max(0, nextAvailableAt - Date.now());
+      if (delay) await wait(delay);
+      nextAvailableAt = Date.now() + intervalMs;
+      return operation();
+    });
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+}
+
+async function upstreamJson(response, operation) {
+  const body = await response.text();
+  let payload = {};
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    // HTML edge errors are classified from the response headers and body below.
+  }
+
+  if (response.status === 403) {
+    const server = response.headers.get("server") ?? "";
+    const cfRay = response.headers.get("cf-ray");
+    const hasRateHeaders = Boolean(
+      response.headers.get("retry-after")
+      || response.headers.get("x-rate-limit-policy")
+      || response.headers.get("x-rate-limit-rules")
+      || response.headers.get("x-rate-limit-ip-state"),
+    );
+    const edgeBlock = Boolean(cfRay)
+      || /cloudflare/i.test(server)
+      || /cloudflare|attention required|error\s*1020|access denied/i.test(body);
+    const rejection = edgeBlock ? "edge-block" : hasRateHeaders ? "rate-policy" : "api-forbidden";
+    console.warn("[poe-trade-engine] upstream request rejected", {
+      operation,
+      status: response.status,
+      rejection,
+      server: server || undefined,
+      cfRay: cfRay || undefined,
+      hasRateHeaders,
+    });
+    const message = edgeBlock
+      ? "Path of Exile also blocked the Hugging Face outbound network (diagnostic: edge-block)."
+      : hasRateHeaders
+        ? "Path of Exile rejected the hosted engine under its rate or abuse policy (diagnostic: rate-policy)."
+        : "Path of Exile returned an API authorization denial to the hosted engine (diagnostic: api-forbidden).";
+    throw Object.assign(new Error(message), { status: 502 });
+  }
+  if (response.status === 429) {
+    throw Object.assign(new Error("The Path of Exile trade API rate limit was reached. Wait before trying again."), { status: 429 });
+  }
+  if (!response.ok) {
+    throw Object.assign(new Error(`Path of Exile trade ${operation} returned ${response.status}.`), { status: 502 });
+  }
+  return payload;
+}
+
+async function fetchTradeListings(input, { fetchImpl, scheduleSearch, scheduleFetch }) {
+  const league = typeof input?.league === "string" ? input.league.trim() : "";
+  const query = input?.query;
+  const limit = Number(input?.limit);
+  const userAgent = typeof input?.userAgent === "string" ? input.userAgent.trim() : "";
+  if (!LEAGUE_NAME_PATTERN.test(league)) throw Object.assign(new Error("A valid Path of Exile league is required."), { status: 400 });
+  if (!query || typeof query !== "object" || JSON.stringify(query).length > MAX_TRADE_QUERY_BYTES) {
+    throw Object.assign(new Error("A valid Path of Exile trade query is required."), { status: 400 });
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > TRADE_FETCH_LIMIT) {
+    throw Object.assign(new Error(`Trade listing limit must be between 1 and ${TRADE_FETCH_LIMIT}.`), { status: 400 });
+  }
+  if (!hasContactEmail(userAgent)) {
+    throw Object.assign(new Error("POE_USER_AGENT is not in the required OAuth AppName/Version contact-email format."), { status: 400 });
+  }
+
+  const headers = { Accept: "application/json", "Content-Type": "application/json", "User-Agent": userAgent };
+  let searchResponse;
+  try {
+    searchResponse = await scheduleSearch(() => fetchImpl(`https://www.pathofexile.com/api/trade/search/${encodeURIComponent(league)}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(query),
+      signal: AbortSignal.timeout(20_000),
+    }));
+  } catch (error) {
+    if (Number.isInteger(error?.status)) throw error;
+    throw Object.assign(new Error("The Path of Exile trade search is unavailable from the hosted engine."), { status: 503 });
+  }
+  const searchPayload = await upstreamJson(searchResponse, "search");
+  const queryId = typeof searchPayload?.id === "string" ? searchPayload.id : "";
+  const ids = Array.isArray(searchPayload?.result)
+    ? searchPayload.result.filter((id) => typeof id === "string").slice(0, limit)
+    : [];
+  if (!queryId || !ids.length) return { queryId, result: [] };
+
+  let fetchResponse;
+  try {
+    fetchResponse = await scheduleFetch(() => fetchImpl(`https://www.pathofexile.com/api/trade/fetch/${ids.join(",")}?query=${encodeURIComponent(queryId)}`, {
+      headers: { Accept: "application/json", "User-Agent": userAgent },
+      signal: AbortSignal.timeout(20_000),
+    }));
+  } catch (error) {
+    if (Number.isInteger(error?.status)) throw error;
+    throw Object.assign(new Error("The Path of Exile trade listing fetch is unavailable from the hosted engine."), { status: 503 });
+  }
+  const fetchPayload = await upstreamJson(fetchResponse, "listing fetch");
+  return { queryId, result: Array.isArray(fetchPayload?.result) ? fetchPayload.result : [] };
+}
+
+function createTradeGateway({ fetchImpl, searchIntervalMs, fetchIntervalMs }) {
+  const cache = new Map();
+  const scheduleSearch = intervalScheduler(searchIntervalMs);
+  const scheduleFetch = intervalScheduler(fetchIntervalMs);
+  return async (input) => {
+    const key = `${input?.league}|${input?.limit}|${JSON.stringify(input?.query)}`;
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.promise;
+    if (cached) cache.delete(key);
+
+    const promise = fetchTradeListings(input, { fetchImpl, scheduleSearch, scheduleFetch });
+    cache.set(key, { expiresAt: Date.now() + TRADE_CACHE_TTL_MS, promise });
+    promise.catch(() => {
+      if (cache.get(key)?.promise === promise) cache.delete(key);
+    });
+    while (cache.size > TRADE_CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value);
+    return promise;
+  };
+}
 
 function activeItemSetId(xml) {
   const itemsTag = xml.match(/<Items\b([^>]*)>/)?.[1] ?? "";
@@ -163,7 +306,13 @@ function json(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-export function createPobEngineServer({ engineToken = process.env.ENGINE_TOKEN } = {}) {
+export function createPobEngineServer({
+  engineToken = process.env.ENGINE_TOKEN,
+  fetchImpl = globalThis.fetch,
+  tradeSearchIntervalMs = TRADE_SEARCH_INTERVAL_MS,
+  tradeFetchIntervalMs = TRADE_FETCH_INTERVAL_MS,
+} = {}) {
+  const tradeGateway = createTradeGateway({ fetchImpl, searchIntervalMs: tradeSearchIntervalMs, fetchIntervalMs: tradeFetchIntervalMs });
   return createServer(async (request, response) => {
     const engineVersion = process.env.POB_VERSION ?? "v2.65.0";
     if (request.method === "GET" && request.url === "/") {
@@ -172,7 +321,7 @@ export function createPobEngineServer({ engineToken = process.env.ENGINE_TOKEN }
         ok: Boolean(engineToken),
         engineVersion,
         status: engineToken ? "ready" : "ENGINE_TOKEN secret is not configured",
-        endpoints: { health: "GET /health", evaluate: "POST /evaluate" },
+        endpoints: { health: "GET /health", evaluate: "POST /evaluate", tradeListings: "POST /trade/listings" },
       });
     }
     if (request.method === "GET" && request.url === "/health") {
@@ -182,13 +331,15 @@ export function createPobEngineServer({ engineToken = process.env.ENGINE_TOKEN }
         ...(engineToken ? {} : { error: "ENGINE_TOKEN secret is not configured." }),
       });
     }
-    if (request.method !== "POST" || request.url !== "/evaluate") return json(response, 404, { error: "Not found." });
+    const isEvaluate = request.method === "POST" && request.url === "/evaluate";
+    const isTradeListings = request.method === "POST" && request.url === "/trade/listings";
+    if (!isEvaluate && !isTradeListings) return json(response, 404, { error: "Not found." });
     if (!engineToken) return json(response, 503, { error: "ENGINE_TOKEN secret is not configured." });
     if (request.headers.authorization !== `Bearer ${engineToken}`) return json(response, 401, { error: "Unauthorized." });
 
     try {
       const payload = await readJsonBody(request);
-      const result = await evaluateScenarios(payload);
+      const result = isTradeListings ? await tradeGateway(payload) : await evaluateScenarios(payload);
       return json(response, 200, { engineVersion, ...result });
     } catch (error) {
       const status = Number.isInteger(error?.status) ? error.status : 500;
