@@ -22,6 +22,7 @@
     "deploy:engine:hf": "node scripts/deploy-huggingface-engine.mjs"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.25.0",
