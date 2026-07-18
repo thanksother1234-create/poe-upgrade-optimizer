@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockBuild } from "@/mocks/build";
 import { LiveTradeMarketService, normalizePoeUserAgent } from "./live-trade-market-service";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("LiveTradeMarketService", () => {
   it("fetches, decodes, and maps a real trade listing shape", async () => {
@@ -47,5 +50,35 @@ describe("LiveTradeMarketService", () => {
       .toBe("OAuth PoEUpgradeOptimizer/0.2 (contact: owner@example.com)");
     expect(normalizePoeUserAgent("OAuth ExistingClient/1.0 (contact: owner@example.com)"))
       .toBe("OAuth ExistingClient/1.0 (contact: owner@example.com)");
+  });
+
+  it("distinguishes a hosting edge block from an invalid contact identity", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Access denied by Cloudflare", {
+      status: 403,
+      headers: { "content-type": "text/html", "server": "cloudflare", "cf-ray": "test-ray" },
+    })));
+
+    await expect(new LiveTradeMarketService("OAuth TestAgent/1.0 (contact: owner@example.com)").searchUpgrades(
+      structuredClone(mockBuild), "ring1", { amount: 5, currency: "divine" }, "Standard",
+    )).rejects.toThrow("Vercel's hosting network (diagnostic: edge-block)");
+  });
+
+  it("reports malformed POE_USER_AGENT configuration before blaming the hosting network", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Forbidden" }, { status: 403 })));
+
+    await expect(new LiveTradeMarketService("OAuth TestAgent/1.0 (contact: placeholder)").searchUpgrades(
+      structuredClone(mockBuild), "ring1", { amount: 5, currency: "divine" }, "Standard",
+    )).rejects.toThrow("POE_USER_AGENT is not in the required format");
+  });
+
+  it("identifies a JSON authorization denial when the configured identity is valid", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Forbidden" }, { status: 403 })));
+
+    await expect(new LiveTradeMarketService("OAuth TestAgent/1.0 (contact: owner@example.com)").searchUpgrades(
+      structuredClone(mockBuild), "ring1", { amount: 5, currency: "divine" }, "Standard",
+    )).rejects.toThrow("diagnostic: api-forbidden");
   });
 });
