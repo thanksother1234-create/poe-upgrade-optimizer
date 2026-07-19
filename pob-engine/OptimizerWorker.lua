@@ -16,6 +16,48 @@ end
 io.stdout:setvbuf("no")
 dofile("HeadlessWrapper.lua")
 
+local function configureHeadlessDataAccess()
+	-- PoB's generic HeadlessWrapper leaves GetScriptPath/NewFileSearch as
+	-- no-op stubs. Timeless-jewel passives are loaded lazily during the first
+	-- calculation, so without working file lookup PoB silently evaluates the
+	-- untransformed tree. The Docker build expands the bundled jewel tables to
+	-- .bin files; expose just enough of the normal file-search API to load them.
+	local sourcePath = os.getenv("POB_SOURCE_PATH") or "."
+	function GetScriptPath()
+		return sourcePath
+	end
+
+	local fileSearchClass = { }
+	fileSearchClass.__index = fileSearchClass
+	function fileSearchClass:GetFileName()
+		return self.fileName
+	end
+	function fileSearchClass:GetFileModifiedTime()
+		return self.modified
+	end
+	function fileSearchClass:NextFile()
+		return false
+	end
+
+	function NewFileSearch(fileName)
+		if tostring(fileName):find("[*?]") then
+			return nil
+		end
+		local file = io.open(fileName, "rb")
+		if not file then
+			return nil
+		end
+		file:close()
+		return setmetatable({
+			fileName = tostring(fileName):match("([^/\\]+)$") or tostring(fileName),
+			-- Prefer the build-generated .bin over the bundled compressed file.
+			modified = tostring(fileName):match("%.bin$") and 2 or 1,
+		}, fileSearchClass)
+	end
+end
+
+configureHeadlessDataAccess()
+
 local function numberOrZero(value)
 	if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then
 		return 0
@@ -91,41 +133,42 @@ local function metricSignature(output)
 end
 
 local function restoreActiveBuildState()
-	-- Headless mode can finish XML loading with the set ids restored but the
-	-- calculation-facing references still pointing at their initial defaults.
-	-- Rebind only sets that are present; the tree guard avoids the legacy
-	-- no-curSpec crash that an unconditional SetActiveSpec call caused.
-	-- Every PoB setter finishes by syncing the visual loadout dropdown. That
-	-- UI-only sync assumes all linked set titles exist and crashes in headless
-	-- mode for otherwise valid builds, so suppress it only during rebinding.
-	local syncLoadouts = build.SyncLoadouts
-	build.SyncLoadouts = function() end
-
+	-- Bind calculation-facing references directly to the objects loaded from
+	-- XML. Calling SetActiveItemSet on the already-active set is destructive:
+	-- PoB first writes the current UI slots back into that same set, which can
+	-- replace newly loaded equipment and flask ids with initial/default state.
 	local treeTab = build and build.treeTab
 	local activeSpec = treeTab and treeTab.activeSpec
 	if activeSpec and treeTab.specList and treeTab.specList[activeSpec] then
-		treeTab:SetActiveSpec(activeSpec)
+		build.spec = treeTab.specList[activeSpec]
 	end
 
 	local itemsTab = build and build.itemsTab
 	local activeItemSetId = itemsTab and itemsTab.activeItemSetId
 	if activeItemSetId and itemsTab.itemSets and itemsTab.itemSets[activeItemSetId] then
-		itemsTab:SetActiveItemSet(activeItemSetId)
+		itemsTab.activeItemSet = itemsTab.itemSets[activeItemSetId]
+		for slotName, slot in pairs(itemsTab.slots or { }) do
+			local savedSlot = itemsTab.activeItemSet[slotName]
+			if savedSlot and not slot.nodeId then
+				slot.selItemId = savedSlot.selItemId
+				slot.active = savedSlot.active
+			end
+		end
 	end
 
 	local skillsTab = build and build.skillsTab
 	local activeSkillSetId = skillsTab and skillsTab.activeSkillSetId
 	if activeSkillSetId and skillsTab.skillSets and skillsTab.skillSets[activeSkillSetId] then
-		skillsTab:SetActiveSkillSet(activeSkillSetId)
+		skillsTab.socketGroupList = skillsTab.skillSets[activeSkillSetId].socketGroupList
 	end
 
 	local configTab = build and build.configTab
 	local activeConfigSetId = configTab and configTab.activeConfigSetId
 	if activeConfigSetId and configTab.configSets and configTab.configSets[activeConfigSetId] then
-		configTab:SetActiveConfigSet(activeConfigSetId)
+		configTab.input = configTab.configSets[activeConfigSetId].input
+		configTab.placeholder = configTab.configSets[activeConfigSetId].placeholder
 		configTab:BuildModList()
 	end
-	build.SyncLoadouts = syncLoadouts
 
 	build.modFlag = true
 	build.buildFlag = true

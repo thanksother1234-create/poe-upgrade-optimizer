@@ -12,6 +12,9 @@ ENV POB_VERSION=${POB_VERSION} \
 RUN apk add --no-cache git nodejs npm \
     && git clone --depth 1 --branch "${POB_VERSION}" https://github.com/PathOfBuildingCommunity/PathOfBuilding.git /opt/pathofbuilding
 
+COPY prepare-timeless-data.mjs /tmp/prepare-timeless-data.mjs
+RUN node /tmp/prepare-timeless-data.mjs /opt/pathofbuilding/src/Data/TimelessJewelData
+
 COPY OptimizerWorker.lua /opt/pathofbuilding/src/OptimizerWorker.lua
 WORKDIR /app
 COPY package.json server.mjs ./

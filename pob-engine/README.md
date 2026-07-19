@@ -15,6 +15,8 @@ This HTTP service runs the official Path of Building Community Lua calculation e
 
 Every baseline and candidate is evaluated in a fresh LuaJIT/PoB process. This prevents Path of Building from retaining the previously loaded item set between comparisons. Whole comparison requests enter a bounded FIFO queue, with one comparison active by default, and a shared process limiter allows two PoB workers at a time inside that comparison. This keeps CPU Basic from being flooded when several users optimize at once. Streaming clients receive live queue-position updates.
 
+The Docker build also expands PoB's bundled timeless-jewel tables and gives the headless worker read access to them. This is required for exact Lethal Pride, Brutal Restraint, Militant Faith, Elegant Hubris, and Glorious Vanity calculations; PoB's stock headless wrapper otherwise silently evaluates the original passive tree without those jewel transformations.
+
 The root URL and `GET /health` are public status endpoints. `POST /evaluate` requires the `ENGINE_TOKEN` bearer token. The service refuses evaluation requests if `ENGINE_TOKEN` is missing. This service does not contact the PoE trade endpoint; it only runs Path of Building calculations for candidates supplied by the user.
 
 ## Deploy with Hugging Face Pro

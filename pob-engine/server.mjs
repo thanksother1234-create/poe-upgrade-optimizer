@@ -342,6 +342,9 @@ export async function evaluateScenarios({ buildXml, scenarios, expectedBaseline,
     const baseline = outcomes[0];
     if (!baseline || baseline.error || !baseline.metrics) throw new Error(`Baseline build failed: ${baseline?.error ?? "Path of Building returned no metrics."}`);
     const baselineMismatches = validateBaseline(expectedBaseline, baseline.metrics, expectedDpsMetric, baseline.dpsMetric);
+    if (baselineMismatches.length) {
+      throw Object.assign(new Error(`Path of Building did not reproduce the imported baseline, so no candidates were ranked: ${baselineMismatches.slice(0, 4).join("; ")}.`), { status: 409 });
+    }
     const results = scenarios.map((scenario, index) => {
       const outcome = outcomes[index + 1];
       if (!outcome || outcome.error || !outcome.metrics) return { id: scenario.id, error: outcome?.error ?? "Path of Building returned no metrics for this candidate." };
@@ -354,7 +357,6 @@ export async function evaluateScenarios({ buildXml, scenarios, expectedBaseline,
       baseline: baseline.metrics,
       dpsMetric: baseline.dpsMetric,
       results,
-      ...(baselineMismatches.length ? { baselineDiagnostics: baselineMismatches } : {}),
     };
   } finally {
     await rm(directory, { recursive: true, force: true });
