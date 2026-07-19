@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Circle, Crown, Footprints, Gem, Hand, Link2, PackageSearch, Shield, Shirt, Sword } from "lucide-react";
 import { Build, EquipmentSlot, Item } from "@/models";
 import { getItemArtworkCandidates } from "@/lib/item-art";
+import { getSkillGemArtwork } from "@/lib/skill-gem-art";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,16 +24,16 @@ const slotLabels: Record<EquipmentSlot, string> = {
 };
 
 const slotLayout: Record<EquipmentSlot, string> = {
-  weapon: "col-start-1 col-span-2 row-start-2 row-span-4",
-  offhand: "col-start-7 col-span-2 row-start-2 row-span-4",
-  helmet: "col-start-4 col-span-2 row-start-1 row-span-2",
-  bodyArmour: "col-start-4 col-span-2 row-start-3 row-span-3",
-  gloves: "col-start-2 col-span-2 row-start-6 row-span-2",
-  boots: "col-start-6 col-span-2 row-start-6 row-span-2",
-  amulet: "col-start-6 row-start-2",
-  ring1: "col-start-3 row-start-3",
-  ring2: "col-start-6 row-start-3",
-  belt: "col-start-4 col-span-2 row-start-6",
+  weapon: "col-start-1 col-span-2 row-start-1 row-span-4",
+  offhand: "col-start-6 col-span-2 row-start-1 row-span-4",
+  helmet: "col-start-3 col-span-2 row-start-1 row-span-2",
+  bodyArmour: "col-start-3 col-span-2 row-start-3 row-span-3",
+  gloves: "col-start-1 col-span-2 row-start-5 row-span-2",
+  boots: "col-start-5 col-span-2 row-start-5 row-span-2",
+  amulet: "col-start-5 row-start-1",
+  ring1: "col-start-5 row-start-2",
+  ring2: "col-start-5 row-start-3",
+  belt: "col-start-3 col-span-2 row-start-6",
 };
 
 const rarityStyles: Record<Item["rarity"], { border: string; glow: string; name: string }> = {
@@ -71,7 +72,7 @@ function ItemArtwork({ item, slot }: { item: Item; slot: EquipmentSlot }) {
     height={234}
     unoptimized
     draggable={false}
-    className="max-h-[82%] max-w-[82%] object-contain drop-shadow-[0_8px_9px_rgba(0,0,0,0.9)] transition-transform duration-200 group-hover:scale-[1.04]"
+    className="max-h-[76%] max-w-[76%] object-contain drop-shadow-[0_8px_9px_rgba(0,0,0,0.9)] transition-transform duration-200 group-hover:scale-[1.04]"
     onError={() => setCandidateIndex((current) => current + 1)}
   />;
 }
@@ -164,13 +165,21 @@ function SkillGemPanel({ build }: { build: Build }) {
         </div>
         <div className="space-y-1.5">{group.gems.map((gem, index) => <div key={`${gem.name}-${index}`} className="relative flex items-center gap-2">
           {index > 0 && <span aria-hidden="true" className="absolute -top-1.5 left-[9px] h-1.5 border-l border-sky-300/35" />}
-          <span className={cn("relative grid size-[19px] shrink-0 place-items-center rounded-full border", gem.isSupport ? "border-sky-300/45 bg-sky-400/10 text-sky-300" : "border-emerald-300/45 bg-emerald-400/10 text-emerald-300")}><Gem className="size-2.5" /></span>
+          <SkillGemArtwork name={gem.name} isSupport={gem.isSupport} />
           <div className="min-w-0 flex-1"><p className="truncate text-[10px] text-slate-200" title={gem.name}>{gem.name}</p><p className="text-[8px] text-slate-500">Level {gem.level || "?"}{gem.quality > 0 ? ` · ${gem.quality}% quality` : ""}</p></div>
           {index > 0 && <Link2 className="size-2.5 shrink-0 text-sky-300/35" />}
         </div>)}</div>
       </div>) : <div className="grid min-h-32 place-items-center rounded-lg border border-dashed border-slate-700/50 px-4 text-center"><div><Gem className="mx-auto size-5 text-slate-600" /><p className="mt-2 text-[11px] text-slate-400">No skill gems were included in this import.</p></div></div>}
     </div>
   </aside>;
+}
+
+function SkillGemArtwork({ name, isSupport }: { name: string; isSupport: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const source = getSkillGemArtwork(name);
+  return <span className={cn("relative grid size-7 shrink-0 place-items-center overflow-hidden rounded-md border", isSupport ? "border-sky-300/45 bg-sky-400/10 text-sky-300" : "border-emerald-300/45 bg-emerald-400/10 text-emerald-300")}>
+    {source && !failed ? <Image src={source} alt={`${name} gem artwork`} width={28} height={28} unoptimized className="size-full object-cover" onError={() => setFailed(true)} /> : <Gem className="size-3" />}
+  </span>;
 }
 
 export function EquippedInventory({ build }: { build: Build }) {
@@ -182,9 +191,9 @@ export function EquippedInventory({ build }: { build: Build }) {
       </div>
       <div className="overflow-hidden rounded-2xl border border-sky-300/10 bg-[#07111b] p-2 shadow-[inset_0_0_80px_rgba(24,93,130,0.09)] sm:p-3">
         <div className="grid items-stretch gap-3 md:grid-cols-[minmax(0,3fr)_minmax(200px,1fr)] xl:grid-cols-[minmax(0,760px)_minmax(220px,1fr)]">
-          <div className="relative aspect-[8/7] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-4">
+          <div className="relative aspect-[7/6] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-3">
             <div aria-hidden="true" className="pointer-events-none absolute top-[8%] bottom-[9%] left-1/2 w-[27%] -translate-x-1/2 rounded-[45%_45%_30%_30%] border border-sky-300/[0.04] bg-sky-300/[0.025] blur-[1px]" />
-            <div className="relative grid size-full grid-cols-8 grid-rows-7 gap-1 sm:gap-2">
+            <div className="relative grid size-full grid-cols-7 grid-rows-6 gap-1 sm:gap-1.5">
               {(Object.keys(slotLabels) as EquipmentSlot[]).map((slot) => <EquippedItem key={slot} slot={slot} item={build.equipment[slot]} reflected={build.kalandrasTouch?.touchSlot === slot} />)}
             </div>
           </div>

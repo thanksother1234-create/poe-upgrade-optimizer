@@ -34,12 +34,17 @@ function sortedRecord(value) {
 const [baseItems, uniqueItems] = await Promise.all([loadJson("base_items.json"), loadJson("uniques.json")]);
 const bases = {};
 const uniques = {};
+const gems = {};
 
 for (const [, item] of Object.entries(baseItems).sort(([left], [right]) => {
   const leftPenalty = /Royale|Test|Unused/i.test(left) ? 1 : 0;
   const rightPenalty = /Royale|Test|Unused/i.test(right) ? 1 : 0;
   return leftPenalty - rightPenalty || left.localeCompare(right);
 })) {
+  if (item.name && /Skill Gem/i.test(item.item_class) && !gems[item.name]) {
+    const gemArt = artRecord(item);
+    if (gemArt) gems[item.name] = gemArt;
+  }
   if (!item.name || !EQUIPMENT_CLASSES.has(item.item_class) || bases[item.name]) continue;
   const art = artRecord(item);
   if (art) bases[item.name] = art;
@@ -57,5 +62,9 @@ bases["Kinetic Wand"] = { path: "Art/2DItems/Weapons/OneHandWeapons/Wands/Wand3.
 bases["Somatic Wand"] = { path: "Art/2DItems/Weapons/OneHandWeapons/Wands/Wand4.png", width: 1, height: 3 };
 
 const outputPath = path.join(process.cwd(), "src", "data", "item-art.json");
-await writeFile(outputPath, `${JSON.stringify({ bases: sortedRecord(bases), uniques: sortedRecord(uniques) })}\n`, "utf8");
-console.log(`Wrote ${Object.keys(bases).length} base and ${Object.keys(uniques).length} unique item art records to ${outputPath}`);
+const gemOutputPath = path.join(process.cwd(), "src", "data", "skill-gem-art.json");
+await Promise.all([
+  writeFile(outputPath, `${JSON.stringify({ bases: sortedRecord(bases), uniques: sortedRecord(uniques) })}\n`, "utf8"),
+  writeFile(gemOutputPath, `${JSON.stringify(sortedRecord(gems))}\n`, "utf8"),
+]);
+console.log(`Wrote ${Object.keys(bases).length} base, ${Object.keys(uniques).length} unique, and ${Object.keys(gems).length} skill-gem art records`);
