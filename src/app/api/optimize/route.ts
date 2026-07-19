@@ -5,7 +5,7 @@ import { ExactPobCalculationService, PobEngineError } from "@/services/pob/exact
 import { parsePobXml } from "@/services/pob/pob-build-parser";
 import { isManualCandidateCompatible, ManualTradeMarketService, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const leagueNamePattern = /^[A-Za-z0-9][A-Za-z0-9 '()-]{0,79}$/;
 const goals = new Set<OptimizationGoal>(["dps", "survivability", "balanced"]);
@@ -74,18 +74,42 @@ function optimizationInput(value: unknown) {
 }
 
 export async function POST(request: Request) {
+  let input: ReturnType<typeof optimizationInput>;
   try {
-    const input = optimizationInput(await request.json());
-    const optimizer = new UpgradeOptimizer(
-      new ExactPobCalculationService(),
-      new ManualTradeMarketService(input.candidates),
-    );
-    const result = await optimizer.optimize({ ...input, requireVerified: true });
-    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    input = optimizationInput(await request.json());
   } catch (error) {
     if (error instanceof PobEngineError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return NextResponse.json({ error: "The optimizer could not complete the live Path of Building evaluation." }, { status: 500 });
   }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (payload: object) => controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+      try {
+        const optimizer = new UpgradeOptimizer(
+          new ExactPobCalculationService(undefined, undefined, (queue) => send({ type: "queue", ...queue })),
+          new ManualTradeMarketService(input.candidates),
+        );
+        const result = await optimizer.optimize({ ...input, requireVerified: true });
+        send({ type: "result", result });
+      } catch (error) {
+        send({
+          type: "error",
+          error: error instanceof Error ? error.message : "The optimizer could not complete the live Path of Building evaluation.",
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-store, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

@@ -11,6 +11,10 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_SCENARIOS = 20;
 const DEFAULT_WORKER_CONCURRENCY = 2;
 const MAX_WORKER_CONCURRENCY = 4;
+const DEFAULT_JOB_CONCURRENCY = 1;
+const MAX_JOB_CONCURRENCY = 2;
+const DEFAULT_MAX_QUEUED_JOBS = 12;
+const MAX_QUEUED_JOBS = 50;
 const SLOT_NAMES = {
   weapon: "Weapon 1",
   offhand: "Weapon 2",
@@ -51,6 +55,63 @@ export function createConcurrencyLimiter(limit) {
       active -= 1;
       waiting.shift()?.();
     }
+  };
+}
+
+export function createEvaluationQueue({ concurrency, maxQueued } = {}) {
+  const activeLimit = boundedInteger(concurrency, DEFAULT_JOB_CONCURRENCY, 1, MAX_JOB_CONCURRENCY);
+  const queueLimit = boundedInteger(maxQueued, DEFAULT_MAX_QUEUED_JOBS, 1, MAX_QUEUED_JOBS);
+  const waiting = [];
+  let active = 0;
+
+  const updatePositions = () => waiting.forEach((job, index) => job.onPosition?.({
+    position: index + 1,
+    queued: waiting.length,
+    active,
+  }));
+
+  const pump = () => {
+    while (active < activeLimit && waiting.length) {
+      const job = waiting.shift();
+      active += 1;
+      job.onPosition?.({ position: 0, queued: waiting.length, active });
+      updatePositions();
+      Promise.resolve()
+        .then(job.task)
+        .then(job.resolve, job.reject)
+        .finally(() => {
+          active -= 1;
+          pump();
+          updatePositions();
+        });
+    }
+  };
+
+  return {
+    enqueue(task, onPosition, signal) {
+      if (waiting.length >= queueLimit) {
+        throw Object.assign(new Error("The Path of Building queue is full. Please try again shortly."), { status: 429 });
+      }
+      return new Promise((resolve, reject) => {
+        const job = { task, onPosition, resolve, reject };
+        const abort = () => {
+          const index = waiting.indexOf(job);
+          if (index < 0) return;
+          waiting.splice(index, 1);
+          reject(Object.assign(new Error("The queued comparison was cancelled."), { status: 499 }));
+          updatePositions();
+        };
+        if (signal?.aborted) {
+          reject(Object.assign(new Error("The queued comparison was cancelled."), { status: 499 }));
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+        waiting.push(job);
+        updatePositions();
+        pump();
+      });
+    },
+    status: () => ({ active, queued: waiting.length, concurrency: activeLimit, maxQueued: queueLimit }),
   };
 }
 
@@ -277,7 +338,14 @@ function json(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-export function createPobEngineServer({ engineToken = process.env.ENGINE_TOKEN } = {}) {
+export function createPobEngineServer({
+  engineToken = process.env.ENGINE_TOKEN,
+  evaluate = evaluateScenarios,
+  evaluationQueue = createEvaluationQueue({
+    concurrency: process.env.POB_JOB_CONCURRENCY,
+    maxQueued: process.env.POB_MAX_QUEUED_JOBS,
+  }),
+} = {}) {
   return createServer(async (request, response) => {
     const engineVersion = process.env.POB_VERSION ?? "v2.65.0";
     if (request.method === "GET" && request.url === "/") {
@@ -287,6 +355,7 @@ export function createPobEngineServer({ engineToken = process.env.ENGINE_TOKEN }
         engineVersion,
         status: engineToken ? "ready" : "ENGINE_TOKEN secret is not configured",
         endpoints: { health: "GET /health", evaluate: "POST /evaluate" },
+        queue: evaluationQueue.status(),
       });
     }
     if (request.method === "GET" && request.url === "/health") {
@@ -294,6 +363,7 @@ export function createPobEngineServer({ engineToken = process.env.ENGINE_TOKEN }
         ok: Boolean(engineToken),
         engineVersion,
         ...(engineToken ? {} : { error: "ENGINE_TOKEN secret is not configured." }),
+        queue: evaluationQueue.status(),
       });
     }
     if (request.method !== "POST" || request.url !== "/evaluate") return json(response, 404, { error: "Not found." });
@@ -302,10 +372,27 @@ export function createPobEngineServer({ engineToken = process.env.ENGINE_TOKEN }
 
     try {
       const payload = await readJsonBody(request);
-      const result = await evaluateScenarios(payload);
+      const streaming = request.headers.accept?.includes("application/x-ndjson");
+      const cancellation = new AbortController();
+      response.on("close", () => { if (!response.writableEnded) cancellation.abort(); });
+      if (streaming) response.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
+      const sendProgress = (queue) => {
+        if (!streaming || response.destroyed) return;
+        response.write(`${JSON.stringify({ type: queue.position === 0 ? "running" : "queued", ...queue })}\n`);
+      };
+      const result = await evaluationQueue.enqueue(() => evaluate(payload), sendProgress, cancellation.signal);
+      if (streaming) {
+        response.end(`${JSON.stringify({ type: "result", engineVersion, ...result })}\n`);
+        return;
+      }
       return json(response, 200, { engineVersion, ...result });
     } catch (error) {
       const status = Number.isInteger(error?.status) ? error.status : 500;
+      if (response.headersSent) {
+        response.end(`${JSON.stringify({ type: "error", error: error instanceof Error ? error.message : "Path of Building evaluation failed.", status })}\n`);
+        return;
+      }
+      if (status === 429) response.setHeader("Retry-After", "15");
       return json(response, status, { error: error instanceof Error ? error.message : "Path of Building evaluation failed." });
     }
   });

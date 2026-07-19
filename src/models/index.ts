@@ -27,6 +27,8 @@ export interface BuildMetrics {
   lightningResistance: number; chaosResistance: number;
 }
 export interface KalandrasTouchSetup { touchSlot: RingSlot; sourceSlot: RingSlot }
+export interface SkillGem { name: string; level: number; quality: number; isSupport: boolean; enabled: boolean }
+export interface SkillGroup { id: string; label: string; slot?: string; isMain: boolean; gems: SkillGem[] }
 export interface Build {
   id: string;
   character: Character;
@@ -35,6 +37,7 @@ export interface Build {
   sourceXml?: string;
   dpsMetric?: DpsMetric;
   kalandrasTouch?: KalandrasTouchSetup;
+  skillGroups?: SkillGroup[];
 }
 export type CalculationVerification = "estimated" | "pob";
 export type CandidateVerdict = "upgrade" | "downgrade" | "mixed" | "unchanged";

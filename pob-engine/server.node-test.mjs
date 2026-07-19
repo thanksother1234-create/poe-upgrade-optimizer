@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createConcurrencyLimiter, createPobEngineServer, parseEngineOutput, prepareBuildWithReplacements, replaceItemsInBuildXml } from "./server.mjs";
+import { createConcurrencyLimiter, createEvaluationQueue, createPobEngineServer, parseEngineOutput, prepareBuildWithReplacements, replaceItemsInBuildXml } from "./server.mjs";
 
 const buildXml = `<PathOfBuilding><Items activeItemSet="2"><Item id="4">Rarity: RARE\nOld Ring\nRuby Ring</Item><ItemSet id="1"><Slot name="Ring 1" itemId="0"/></ItemSet><ItemSet id="2"><Slot itemId="4" name="Ring 1"/></ItemSet></Items></PathOfBuilding>`;
 
@@ -56,6 +56,54 @@ test("limits fresh worker processes across concurrent jobs", async () => {
   assert.equal(active, 0);
 });
 
+test("queues whole evaluations in FIFO order and reports changing positions", async () => {
+  const queue = createEvaluationQueue({ concurrency: 1, maxQueued: 2 });
+  const releases = [];
+  const positions = [[], [], []];
+  const tasks = [0, 1, 2].map((index) => queue.enqueue(
+    () => new Promise((resolve) => releases[index] = resolve),
+    ({ position }) => positions[index].push(position),
+  ));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(queue.status().active, 1);
+  assert.equal(queue.status().queued, 2);
+  assert.equal(positions[1].at(-1), 1);
+  assert.equal(positions[2].at(-1), 2);
+  releases[0]("first");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(positions[1].at(-1), 0);
+  assert.equal(positions[2].at(-1), 1);
+  releases[1]("second");
+  await new Promise((resolve) => setImmediate(resolve));
+  releases[2]("third");
+  assert.deepEqual(await Promise.all(tasks), ["first", "second", "third"]);
+});
+
+test("rejects new evaluations when the bounded queue is full", async () => {
+  const queue = createEvaluationQueue({ concurrency: 1, maxQueued: 1 });
+  let release;
+  const running = queue.enqueue(() => new Promise((resolve) => release = resolve));
+  const waiting = queue.enqueue(async () => "waiting");
+  assert.throws(() => queue.enqueue(async () => "overflow"), /queue is full/i);
+  await new Promise((resolve) => setImmediate(resolve));
+  release("running");
+  assert.deepEqual(await Promise.all([running, waiting]), ["running", "waiting"]);
+});
+
+test("removes a disconnected request while it is still queued", async () => {
+  const queue = createEvaluationQueue({ concurrency: 1, maxQueued: 2 });
+  let release;
+  const running = queue.enqueue(() => new Promise((resolve) => release = resolve));
+  const cancellation = new AbortController();
+  const cancelled = queue.enqueue(async () => "should not run", undefined, cancellation.signal);
+  cancellation.abort();
+  await assert.rejects(cancelled, /cancelled/i);
+  assert.equal(queue.status().queued, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  release("done");
+  await running;
+});
+
 test("includes worker diagnostics when no baseline marker is returned", () => {
   assert.throws(
     () => parseEngineOutput("initialising", [], "Lua worker failed"),
@@ -82,13 +130,12 @@ test("reports whether the hosted engine is configured", async () => {
   await withServer({ engineToken: "space-secret" }, async (baseUrl) => {
     const root = await fetch(baseUrl);
     assert.equal(root.status, 200);
-    assert.deepEqual(await root.json(), {
-      name: "PoE Upgrade Optimizer Engine",
-      ok: true,
-      engineVersion: "v2.65.0",
-      status: "ready",
-      endpoints: { health: "GET /health", evaluate: "POST /evaluate" },
-    });
+    const details = await root.json();
+    assert.equal(details.name, "PoE Upgrade Optimizer Engine");
+    assert.equal(details.ok, true);
+    assert.equal(details.engineVersion, "v2.65.0");
+    assert.deepEqual(details.endpoints, { health: "GET /health", evaluate: "POST /evaluate" });
+    assert.deepEqual(details.queue, { active: 0, queued: 0, concurrency: 1, maxQueued: 12 });
 
     const health = await fetch(`${baseUrl}/health`);
     assert.equal(health.status, 200);
