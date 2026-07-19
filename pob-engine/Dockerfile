@@ -5,6 +5,8 @@ ENV POB_VERSION=${POB_VERSION} \
     POB_SOURCE_PATH=/opt/pathofbuilding/src \
     POB_WORKER_PATH=/opt/pathofbuilding/src/OptimizerWorker.lua \
     POB_WORKER_CONCURRENCY=2 \
+    POB_JOB_CONCURRENCY=1 \
+    POB_MAX_QUEUED_JOBS=12 \
     PORT=7860
 
 RUN apk add --no-cache git nodejs npm \

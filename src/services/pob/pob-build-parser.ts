@@ -1,4 +1,4 @@
-import { Build, BuildMetrics, Equipment, EquipmentSlot, Item, ItemModifier, ItemRarity, KalandrasTouchSetup, RingSlot } from "@/models";
+import { Build, BuildMetrics, Equipment, EquipmentSlot, Item, ItemModifier, ItemRarity, KalandrasTouchSetup, RingSlot, SkillGroup } from "@/models";
 
 const SLOT_MAP: Record<string, EquipmentSlot> = {
   "Weapon 1": "weapon", "Weapon 2": "offhand", Helmet: "helmet", "Body Armour": "bodyArmour",
@@ -104,16 +104,33 @@ function applyKalandrasTouchCopy(equipment: Equipment): KalandrasTouchSetup | un
   return { touchSlot, sourceSlot };
 }
 
-function parseMainSkill(xml: string, group: number): string {
+function parseSkillGroups(xml: string, mainGroup: number): SkillGroup[] {
   const skillsTag = xml.match(/<Skills\s+([^>]*)>/)?.[1] ?? "";
   const activeSet = attributes(skillsTag).activeSkillSet ?? "1";
   const skillSet = [...xml.matchAll(/<SkillSet\s+([^>]*)>([\s\S]*?)<\/SkillSet>/g)]
     .find((match) => attributes(match[1]).id === activeSet)?.[2] ?? "";
-  const skills = [...skillSet.matchAll(/<Skill\b[^>]*>([\s\S]*?)<\/Skill>/g)];
-  const selected = skills[Math.max(0, group - 1)]?.[1] ?? skills[0]?.[1] ?? "";
-  const firstGem = selected.match(/<Gem\s+([^>]*?(?:nameSpec|skillId)="[^"]+"[^>]*)\/>/);
-  const attrs = attributes(firstGem?.[1] ?? "");
-  return attrs.nameSpec ?? attrs.skillId ?? "Unknown skill";
+  return [...skillSet.matchAll(/<Skill\b([^>]*)>([\s\S]*?)<\/Skill>/g)].map((match, index) => {
+    const skillAttrs = attributes(match[1]);
+    const gems = [...match[2].matchAll(/<Gem\s+([^>]*?(?:nameSpec|skillId)="[^"]+"[^>]*)\/>/g)].map((gemMatch) => {
+      const gem = attributes(gemMatch[1]);
+      const name = gem.nameSpec ?? gem.skillId ?? "Unknown gem";
+      return {
+        name,
+        level: number(gem.level),
+        quality: number(gem.quality),
+        isSupport: /^Support/i.test(gem.skillId ?? "") || / Support$/i.test(name),
+        enabled: gem.enabled !== "false",
+      };
+    }).filter((gem) => gem.enabled);
+    const isMain = index === Math.max(0, mainGroup - 1);
+    return {
+      id: skillAttrs.uuid ?? `skill-group-${index + 1}`,
+      label: skillAttrs.label || gems.find((gem) => !gem.isSupport)?.name || `Socket group ${index + 1}`,
+      ...(skillAttrs.slot ? { slot: skillAttrs.slot } : {}),
+      isMain,
+      gems,
+    };
+  }).filter((group) => group.gems.length > 0 && attributes(skillSet).enabled !== "false");
 }
 
 function parseCharacterName(xml: string): string {
@@ -148,13 +165,18 @@ export function parsePobXml(xml: string): Build {
   const name = parseCharacterName(xml);
   const equipment = parseEquipment(xml, parseItems(xml));
   const kalandrasTouch = applyKalandrasTouchCopy(equipment);
+  const mainSocketGroup = number(buildAttrs.mainSocketGroup) || 1;
+  const skillGroups = parseSkillGroups(xml, mainSocketGroup);
+  const mainSkill = skillGroups.find((group) => group.isMain)?.gems.find((gem) => !gem.isSupport)?.name
+    ?? skillGroups[0]?.gems[0]?.name
+    ?? "Unknown skill";
   return {
     id: `pob-${name}-${xml.length}`,
     character: {
       name, className: buildAttrs.className ?? "Unknown class", ascendancy: buildAttrs.ascendClassName ?? "",
-      level: number(buildAttrs.level), mainSkill: parseMainSkill(xml, number(buildAttrs.mainSocketGroup) || 1), league: "Imported PoB",
+      level: number(buildAttrs.level), mainSkill, league: "Imported PoB",
     },
-    equipment, metrics, sourceXml: xml, dpsMetric,
+    equipment, metrics, sourceXml: xml, dpsMetric, skillGroups,
     ...(kalandrasTouch ? { kalandrasTouch } : {}),
   };
 }

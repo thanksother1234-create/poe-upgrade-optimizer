@@ -9,6 +9,11 @@ interface EngineScenarioResult {
 }
 
 interface EngineResponse {
+  type?: unknown;
+  position?: unknown;
+  queued?: unknown;
+  active?: unknown;
+  status?: unknown;
   engineVersion?: unknown;
   dpsMetric?: unknown;
   baseline?: unknown;
@@ -59,6 +64,7 @@ export class ExactPobCalculationService implements PobCalculationService {
   constructor(
     private readonly engineUrl = process.env.POB_ENGINE_URL,
     private readonly engineToken = process.env.POB_ENGINE_TOKEN,
+    private readonly onQueueUpdate?: (update: { state: "queued" | "running"; position: number; queued: number; active: number }) => void,
   ) {}
 
   async importBuild(pobCode: string) {
@@ -116,7 +122,7 @@ export class ExactPobCalculationService implements PobCalculationService {
     if (!build.sourceXml) throw new PobEngineError("Re-import this build before optimizing so its full Path of Building data is available.", 400);
 
     const baseUrl = this.engineUrl.endsWith("/") ? this.engineUrl : `${this.engineUrl}/`;
-    const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
+    const headers: Record<string, string> = { Accept: "application/x-ndjson", "Content-Type": "application/json" };
     if (this.engineToken) headers.Authorization = `Bearer ${this.engineToken}`;
 
     let response: Response;
@@ -126,7 +132,7 @@ export class ExactPobCalculationService implements PobCalculationService {
         headers,
         body: JSON.stringify({ buildXml: build.sourceXml, scenarios }),
         cache: "no-store",
-        signal: AbortSignal.timeout(110_000),
+        signal: AbortSignal.timeout(290_000),
       });
     } catch (error) {
       const message = error instanceof Error && error.name === "TimeoutError"
@@ -135,8 +141,39 @@ export class ExactPobCalculationService implements PobCalculationService {
       throw new PobEngineError(message, 503);
     }
 
-    const payload = await response.json().catch(() => ({})) as EngineResponse;
-    if (!response.ok) throw new PobEngineError(typeof payload.error === "string" ? payload.error : `Path of Building engine returned ${response.status}.`, response.status);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as EngineResponse;
+      throw new PobEngineError(typeof payload.error === "string" ? payload.error : `Path of Building engine returned ${response.status}.`, response.status);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new PobEngineError("The Path of Building engine returned an empty response.");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let payload: EngineResponse | undefined;
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      const message = JSON.parse(line) as EngineResponse;
+      if (message.type === "queued" || message.type === "running") {
+        this.onQueueUpdate?.({
+          state: message.type,
+          position: Number(message.position) || 0,
+          queued: Number(message.queued) || 0,
+          active: Number(message.active) || 0,
+        });
+      } else if (message.type === "error") {
+        throw new PobEngineError(typeof message.error === "string" ? message.error : "Path of Building evaluation failed.", Number(message.status) || 500);
+      } else if (message.type === "result" || message.baseline) payload = message;
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) handleLine(line);
+      if (done) break;
+    }
+    handleLine(buffer);
+    if (!payload) throw new PobEngineError("The Path of Building engine ended before returning a result.");
     const baseline = parseMetrics(payload.baseline);
     const results = Array.isArray(payload.results) ? payload.results as EngineScenarioResult[] : [];
     const parsedResults = results.map((result) => {

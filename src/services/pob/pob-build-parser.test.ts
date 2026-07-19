@@ -9,7 +9,7 @@ const xml = `<?xml version="1.0"?><PathOfBuilding>
   <PlayerStat value="33540" stat="ColdMaximumHitTaken"/><PlayerStat value="35000" stat="LightningMaximumHitTaken"/>
   <PlayerStat value="8908" stat="ChaosMaximumHitTaken"/><PlayerStat value="8431" stat="Life"/>
 </Build>
-<Skills activeSkillSet="1"><SkillSet id="1"><Skill><Gem nameSpec="Kinetic Blast" skillId="KineticBlast"/></Skill></SkillSet></Skills>
+<Skills activeSkillSet="1"><SkillSet id="1"><Skill slot="Weapon 1" label="Kinetic Blast"><Gem level="20" quality="20" nameSpec="Kinetic Blast" skillId="KineticBlast"/><Gem level="20" quality="20" nameSpec="Greater Multiple Projectiles Support" skillId="SupportGreaterMultipleProjectiles"/></Skill><Skill slot="Helmet"><Gem level="20" nameSpec="Determination" skillId="Determination"/></Skill></SkillSet></Skills>
 <Import importLink="https://example.com/profile/ActualCharacter"/>
 <Items activeItemSet="2"><Item id="10">
 Item Class: Wands
@@ -64,6 +64,15 @@ describe("PoB build parser", () => {
   it("reads character details, metrics, main skill, and the active item set", () => {
     const build = parsePobXml(xml);
     expect(build.character).toMatchObject({ name: "ActualCharacter", className: "Marauder", ascendancy: "Juggernaut", level: 98, mainSkill: "Kinetic Blast" });
+    expect(build.skillGroups).toEqual([
+      { id: "skill-group-1", label: "Kinetic Blast", slot: "Weapon 1", isMain: true, gems: [
+        { name: "Kinetic Blast", level: 20, quality: 20, isSupport: false, enabled: true },
+        { name: "Greater Multiple Projectiles Support", level: 20, quality: 20, isSupport: true, enabled: true },
+      ] },
+      { id: "skill-group-2", label: "Determination", slot: "Helmet", isMain: false, gems: [
+        { name: "Determination", level: 20, quality: 0, isSupport: false, enabled: true },
+      ] },
+    ]);
     expect(build.metrics).toMatchObject({ totalDps: 6701956, effectiveHitPool: 46578, elementalMaxHit: 33540 });
     expect(build.dpsMetric).toBe("CombinedDPS");
     expect(build.equipment.weapon).toMatchObject({ name: "Glyph Chant", baseType: "Kinetic Wand", rarity: "rare" });

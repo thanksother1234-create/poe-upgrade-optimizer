@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
-import { Circle, Crown, Footprints, Gem, Hand, PackageSearch, Shield, Shirt, Sword } from "lucide-react";
+import { Circle, Crown, Footprints, Gem, Hand, Link2, PackageSearch, Shield, Shirt, Sword } from "lucide-react";
 import { Build, EquipmentSlot, Item } from "@/models";
 import { getItemArtworkCandidates } from "@/lib/item-art";
 import { cn } from "@/lib/utils";
@@ -149,6 +149,30 @@ function EquippedItem({ item, slot, reflected }: { item: Item; slot: EquipmentSl
   </Tooltip>;
 }
 
+function SkillGemPanel({ build }: { build: Build }) {
+  const groups = build.skillGroups ?? [];
+  return <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-300/10 bg-[linear-gradient(180deg,rgba(16,31,44,0.94),rgba(5,13,21,0.98))] shadow-[inset_0_0_45px_rgba(24,93,130,0.08)]">
+    <div className="border-b border-sky-300/10 px-4 py-3">
+      <div className="flex items-center gap-2"><Gem className="size-4 text-sky-300" /><p className="text-sm font-semibold text-sky-100">Skills & supports</p></div>
+      <p className="mt-1 text-[10px] leading-4 text-slate-500">Linked gems from your active PoB skill set</p>
+    </div>
+    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 [scrollbar-color:rgba(125,211,252,0.2)_transparent]">
+      {groups.length ? groups.map((group) => <div key={group.id} className={cn("rounded-lg border p-2.5", group.isMain ? "border-amber-300/30 bg-amber-300/[0.05]" : "border-slate-700/50 bg-slate-950/35")}>
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <div className="min-w-0"><p className={cn("truncate text-[11px] font-semibold", group.isMain ? "text-amber-200" : "text-sky-100")}>{group.label}</p>{group.slot && <p className="mt-0.5 truncate text-[9px] uppercase tracking-wide text-slate-500">{group.slot}</p>}</div>
+          <Badge variant="outline" className="h-4 shrink-0 px-1.5 text-[8px]">{group.gems.length}L</Badge>
+        </div>
+        <div className="space-y-1.5">{group.gems.map((gem, index) => <div key={`${gem.name}-${index}`} className="relative flex items-center gap-2">
+          {index > 0 && <span aria-hidden="true" className="absolute -top-1.5 left-[9px] h-1.5 border-l border-sky-300/35" />}
+          <span className={cn("relative grid size-[19px] shrink-0 place-items-center rounded-full border", gem.isSupport ? "border-sky-300/45 bg-sky-400/10 text-sky-300" : "border-emerald-300/45 bg-emerald-400/10 text-emerald-300")}><Gem className="size-2.5" /></span>
+          <div className="min-w-0 flex-1"><p className="truncate text-[10px] text-slate-200" title={gem.name}>{gem.name}</p><p className="text-[8px] text-slate-500">Level {gem.level || "?"}{gem.quality > 0 ? ` · ${gem.quality}% quality` : ""}</p></div>
+          {index > 0 && <Link2 className="size-2.5 shrink-0 text-sky-300/35" />}
+        </div>)}</div>
+      </div>) : <div className="grid min-h-32 place-items-center rounded-lg border border-dashed border-slate-700/50 px-4 text-center"><div><Gem className="mx-auto size-5 text-slate-600" /><p className="mt-2 text-[11px] text-slate-400">No skill gems were included in this import.</p></div></div>}
+    </div>
+  </aside>;
+}
+
 export function EquippedInventory({ build }: { build: Build }) {
   return <TooltipProvider delayDuration={140}>
     <div className="space-y-4">
@@ -157,11 +181,14 @@ export function EquippedInventory({ build }: { build: Build }) {
         <Badge variant="outline" className="border-sky-400/25 bg-sky-400/5 text-sky-200">{Object.values(build.equipment).filter((item) => !item.id.startsWith("empty-")).length} items equipped</Badge>
       </div>
       <div className="overflow-hidden rounded-2xl border border-sky-300/10 bg-[#07111b] p-2 shadow-[inset_0_0_80px_rgba(24,93,130,0.09)] sm:p-3">
-        <div className="relative mx-auto aspect-[8/7] w-full max-w-[760px] overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-4">
-          <div aria-hidden="true" className="pointer-events-none absolute top-[8%] bottom-[9%] left-1/2 w-[27%] -translate-x-1/2 rounded-[45%_45%_30%_30%] border border-sky-300/[0.04] bg-sky-300/[0.025] blur-[1px]" />
-          <div className="relative grid size-full grid-cols-8 grid-rows-7 gap-1 sm:gap-2">
-            {(Object.keys(slotLabels) as EquipmentSlot[]).map((slot) => <EquippedItem key={slot} slot={slot} item={build.equipment[slot]} reflected={build.kalandrasTouch?.touchSlot === slot} />)}
+        <div className="grid items-stretch gap-3 md:grid-cols-[minmax(0,3fr)_minmax(200px,1fr)] xl:grid-cols-[minmax(0,760px)_minmax(220px,1fr)]">
+          <div className="relative aspect-[8/7] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-4">
+            <div aria-hidden="true" className="pointer-events-none absolute top-[8%] bottom-[9%] left-1/2 w-[27%] -translate-x-1/2 rounded-[45%_45%_30%_30%] border border-sky-300/[0.04] bg-sky-300/[0.025] blur-[1px]" />
+            <div className="relative grid size-full grid-cols-8 grid-rows-7 gap-1 sm:gap-2">
+              {(Object.keys(slotLabels) as EquipmentSlot[]).map((slot) => <EquippedItem key={slot} slot={slot} item={build.equipment[slot]} reflected={build.kalandrasTouch?.touchSlot === slot} />)}
+            </div>
           </div>
+          <SkillGemPanel build={build} />
         </div>
       </div>
     </div>

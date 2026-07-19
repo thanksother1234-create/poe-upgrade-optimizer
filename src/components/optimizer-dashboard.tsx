@@ -270,6 +270,7 @@ export default function OptimizerDashboard() {
   const [slots, setSlots] = useState<EquipmentSlot[]>(defaultSlots);
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [queueStatus, setQueueStatus] = useState<{ state: "connecting" | "queued" | "running"; position: number }>({ state: "connecting", position: 0 });
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
   const [optimizationError, setOptimizationError] = useState("");
@@ -353,7 +354,7 @@ export default function OptimizerDashboard() {
   const run = async () => {
     if (!build?.sourceXml || !slots.length || !candidates.length) return;
     try {
-      setLoading(true); setOptimizationError(""); setResult(null);
+      setLoading(true); setQueueStatus({ state: "connecting", position: 0 }); setOptimizationError(""); setResult(null);
       const response = await fetch("/api/optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -366,9 +367,38 @@ export default function OptimizerDashboard() {
           candidates: candidates.map((candidate) => ({ slot: candidate.slot, rawText: candidate.rawText, price: candidate.price })),
         }),
       });
-      const payload = await response.json() as OptimizationResult & { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "The optimizer could not evaluate the pasted candidates.");
-      setResult(payload);
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error ?? "The optimizer could not evaluate the pasted candidates.");
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("The optimizer returned an empty response.");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = false;
+      const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const message = JSON.parse(line) as {
+          type?: string;
+          state?: "queued" | "running";
+          position?: number;
+          result?: OptimizationResult;
+          error?: string;
+        };
+        if (message.type === "queue" && message.state) setQueueStatus({ state: message.state, position: Number(message.position) || 0 });
+        if (message.type === "error") throw new Error(message.error ?? "The optimizer could not evaluate the pasted candidates.");
+        if (message.type === "result" && message.result) { setResult(message.result); completed = true; }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) handleLine(line);
+        if (done) break;
+      }
+      handleLine(buffer);
+      if (!completed) throw new Error("The optimizer ended before returning results.");
       setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth" }), 20);
     } catch (caught) {
       setOptimizationError(caught instanceof Error ? caught.message : "The optimizer could not evaluate the pasted candidates.");
@@ -588,7 +618,8 @@ export default function OptimizerDashboard() {
             <div className="space-y-4 border-t border-border pt-6 lg:col-span-2">
               <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-xl font-semibold">Compare them with your build</h3><p className="mt-1 text-sm text-muted-foreground">Path of Building will equip each item and show you what genuinely changes.</p></div><Badge variant="secondary">{candidates.length} ready</Badge></div>
               {candidates.length > 0 ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{candidates.map((candidate) => <Card key={candidate.id} className="gap-3 border-border/70 bg-background/35 p-4 shadow-none"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-medium text-primary">{slotLabels[candidate.slot]}</p><p className="mt-1 truncate font-heading text-base font-semibold text-amber-100">{candidate.item.name}</p><p className="truncate text-[11px] text-muted-foreground">{candidate.item.baseType}</p></div><Button variant="ghost" size="icon-sm" onClick={() => removeCandidate(candidate.id)} aria-label={`Remove ${candidate.item.name}`}><Trash2 /></Button></div><div className="flex items-center justify-between border-t border-border/60 pt-3"><span className="text-xs text-muted-foreground">{candidate.item.modifiers.length} parsed stats</span><Badge>{candidate.price.amount} {candidate.price.currency === "divine" ? "div" : "chaos"}</Badge></div></Card>)}</div> : <Alert className="border-dashed"><PackageSearch /><AlertTitle>Your shortlist is empty</AlertTitle><AlertDescription>Find a few compatible items on the official trade site, then paste each one above.</AlertDescription></Alert>}
-              <Button size="lg" className="w-full shadow-lg shadow-primary/10" onClick={run} disabled={loading || !candidates.length}>{loading ? <Loader2 className="animate-spin" /> : <DatabaseZap />}{loading ? "Checking every item in PoB..." : `Compare ${candidates.length || ""} candidate${candidates.length === 1 ? "" : "s"}`}<ArrowRight /></Button>
+              <Button size="lg" className="w-full shadow-lg shadow-primary/10" onClick={run} disabled={loading || !candidates.length}>{loading ? <Loader2 className="animate-spin" /> : <DatabaseZap />}{loading ? queueStatus.state === "queued" ? `Waiting in PoB queue · position ${queueStatus.position}` : queueStatus.state === "running" ? "PoB is checking your items..." : "Joining the PoB queue..." : `Compare ${candidates.length || ""} candidate${candidates.length === 1 ? "" : "s"}`}<ArrowRight /></Button>
+              {loading && <div className="rounded-xl border border-sky-400/20 bg-sky-400/5 px-4 py-3 text-center"><p className="text-xs font-medium text-sky-200">{queueStatus.state === "queued" ? `You are number ${queueStatus.position} in the queue` : queueStatus.state === "running" ? "Your comparison is running now" : "Connecting to the comparison service"}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">Comparisons run in order with limited concurrency to keep the Path of Building service responsive.</p></div>}
               {optimizationError && <Alert variant="destructive"><AlertTitle>Optimization failed</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
             </div>
           </CardContent>
