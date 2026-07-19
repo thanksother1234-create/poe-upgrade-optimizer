@@ -4,6 +4,7 @@ export const EQUIPMENT_SLOTS = [
 ] as const;
 
 export type EquipmentSlot = (typeof EQUIPMENT_SLOTS)[number];
+export type RingSlot = Extract<EquipmentSlot, "ring1" | "ring2">;
 export type OptimizationGoal = "dps" | "survivability" | "balanced";
 export type CurrencyUnit = "chaos" | "divine";
 export type DpsMetric = "FullDPS" | "CombinedDPS" | "MinionCombinedDPS" | "TotalDPS";
@@ -26,7 +27,16 @@ export interface BuildMetrics {
   spellSuppression: number; fireResistance: number; coldResistance: number;
   lightningResistance: number; chaosResistance: number;
 }
-export interface Build { id: string; character: Character; equipment: Equipment; metrics: BuildMetrics; sourceXml?: string; dpsMetric?: DpsMetric }
+export interface KalandrasTouchSetup { touchSlot: RingSlot; sourceSlot: RingSlot }
+export interface Build {
+  id: string;
+  character: Character;
+  equipment: Equipment;
+  metrics: BuildMetrics;
+  sourceXml?: string;
+  dpsMetric?: DpsMetric;
+  kalandrasTouch?: KalandrasTouchSetup;
+}
 export type CalculationVerification = "estimated" | "pob";
 export type CandidateVerdict = "upgrade" | "downgrade" | "mixed" | "unchanged";
 export interface SimulationResult {

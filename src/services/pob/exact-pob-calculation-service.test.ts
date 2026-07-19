@@ -51,4 +51,41 @@ describe("ExactPobCalculationService", () => {
     await expect(new ExactPobCalculationService("https://engine.example", "secret").simulateItemReplacements(build, [item]))
       .rejects.toThrow(/could not evaluate Unreadable Ring.*rejected the candidate item text/i);
   });
+
+  it("duplicates a ring candidate into both slots for a Kalandra's Touch build", async () => {
+    const baseline = structuredClone(mockBuild.metrics);
+    const improved = { ...baseline, totalDps: baseline.totalDps + 250_000 };
+    const fetchMock = vi.fn(async (_url: URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        scenarios: { id: string; replacements: { slot: string; rawText: string }[] }[];
+      };
+      expect(request.scenarios[0].replacements).toEqual([
+        { slot: "ring1", rawText: expect.stringContaining("Reflected Upgrade") },
+        { slot: "ring2", rawText: expect.stringContaining("Reflected Upgrade") },
+      ]);
+      return Response.json({
+        engineVersion: "v2.65.0",
+        dpsMetric: "CombinedDPS",
+        baseline,
+        results: [{ id: request.scenarios[0].id, metrics: improved }],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const item: TradeItem = {
+      id: "reflected-ring", slot: "ring2", name: "Reflected Upgrade", baseType: "Amethyst Ring", rarity: "rare",
+      modifiers: [], price: { amount: 5, currency: "divine" },
+      rawText: "Item Class: Rings\nRarity: RARE\nReflected Upgrade\nAmethyst Ring",
+    };
+    const build = {
+      ...structuredClone(mockBuild),
+      sourceXml: "<PathOfBuilding></PathOfBuilding>",
+      kalandrasTouch: { touchSlot: "ring2" as const, sourceSlot: "ring1" as const },
+    };
+    const result = await new ExactPobCalculationService("https://engine.example", "secret")
+      .simulateItemReplacements(build, [item]);
+
+    expect(result.simulations[0].slot).toBe("ring2");
+    expect(result.simulations[0].changes.totalDps).toBe(250_000);
+  });
 });

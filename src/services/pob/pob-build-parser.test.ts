@@ -32,6 +32,29 @@ Implicits: 1
 <ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/></ItemSet></Items>
 </PathOfBuilding>`;
 
+const kalandrasTouchXml = xml
+  .replace('<ItemSet id="1">', `<Item id="12">
+Item Class: Rings
+Rarity: RARE
+Mirror Knot
+Amethyst Ring
+Implicits: 1
++23% to Chaos Resistance
++55 to Strength
+</Item><Item id="13">
+Item Class: Rings
+Rarity: UNIQUE
+Kalandra&apos;s Touch
+Ring
+Implicits: 0
+Reflects your other Ring
+</Item>
+<ItemSet id="1">`)
+  .replace(
+    '<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/></ItemSet>',
+    '<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/><Slot itemId="12" name="Ring 1"/><Slot itemId="13" name="Ring 2"/></ItemSet>',
+  );
+
 describe("PoB build parser", () => {
   it("decodes URL-safe base64 zlib exports", async () => {
     const code = deflateSync(xml).toString("base64url");
@@ -58,5 +81,15 @@ describe("PoB build parser", () => {
     const build = parsePobXml(fullDpsXml);
     expect(build.metrics.totalDps).toBe(9_100_000);
     expect(build.dpsMetric).toBe("FullDPS");
+  });
+
+  it("detects Kalandra's Touch and imports the other ring as its displayed copy", () => {
+    const build = parsePobXml(kalandrasTouchXml);
+
+    expect(build.kalandrasTouch).toEqual({ touchSlot: "ring2", sourceSlot: "ring1" });
+    expect(build.equipment.ring1).toMatchObject({ name: "Mirror Knot", baseType: "Amethyst Ring" });
+    expect(build.equipment.ring2).toMatchObject({ name: "Mirror Knot", baseType: "Amethyst Ring" });
+    expect(build.equipment.ring2.id).not.toBe(build.equipment.ring1.id);
+    expect(build.equipment.ring2.rawText).toBe(build.equipment.ring1.rawText);
   });
 });
