@@ -16,6 +16,11 @@ const LOCAL_BASE_ART: Record<string, string> = {
 };
 
 interface ItemArtRecord { path: string; width: number; height: number }
+interface ItemArtworkOptions { magicFlaskBase?: boolean }
+
+const FLASK_BASE_TYPES = Object.keys(itemArt.bases)
+  .filter((baseType) => baseType.endsWith(" Flask"))
+  .sort((left, right) => right.length - left.length);
 
 function poeCdnUrl(record: ItemArtRecord | undefined) {
   if (!record) return undefined;
@@ -23,8 +28,21 @@ function poeCdnUrl(record: ItemArtRecord | undefined) {
   return `https://web.poecdn.com/image/${encodedPath}?scale=1&w=${record.width}&h=${record.height}`;
 }
 
-export function getItemArtworkCandidates(item: Item): string[] {
+export function getMagicFlaskBaseType(item: Item): string | undefined {
+  if (item.rarity !== "magic") return undefined;
+  if (item.baseType.endsWith(" Flask") && item.baseType in itemArt.bases) return item.baseType;
+  const itemName = ` ${item.name.toLowerCase()} `;
+  return FLASK_BASE_TYPES.find((baseType) => itemName.includes(` ${baseType.toLowerCase()} `));
+}
+
+export function getItemArtworkCandidates(item: Item, options: ItemArtworkOptions = {}): string[] {
   if (item.id.startsWith("empty-") || item.baseType === "No item equipped") return [];
+
+  const magicFlaskBaseType = options.magicFlaskBase ? getMagicFlaskBaseType(item) : undefined;
+  if (magicFlaskBaseType) {
+    const record = itemArt.bases[magicFlaskBaseType as keyof typeof itemArt.bases];
+    return [poeCdnUrl(record)].filter((candidate): candidate is string => Boolean(candidate));
+  }
 
   const candidates = [item.imageUrl, LOCAL_BASE_ART[item.baseType]];
   if (item.rarity === "unique") candidates.push(poeCdnUrl(itemArt.uniques[item.name as keyof typeof itemArt.uniques]));

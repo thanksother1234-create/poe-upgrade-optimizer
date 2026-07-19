@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { deflateSync } from "node:zlib";
+import { prepareTimelessData } from "./prepare-timeless-data.mjs";
 import { createConcurrencyLimiter, createEvaluationQueue, createPobEngineServer, parseEngineOutput, prepareBuildWithReplacements, replaceItemsInBuildXml, validateBaseline } from "./server.mjs";
 
 const buildXml = `<PathOfBuilding><Items activeItemSet="2"><Item id="4">Rarity: RARE\nOld Ring\nRuby Ring</Item><ItemSet id="1"><Slot name="Ring 1" itemId="0"/></ItemSet><ItemSet id="2"><Slot itemId="4" name="Ring 1"/></ItemSet></Items></PathOfBuilding>`;
@@ -75,21 +79,38 @@ test("reports material baseline and DPS-mode mismatches", () => {
   assert.match(mismatches.join(" "), /effectiveHitPool was 46579.*8011/i);
 });
 
-test("cached PoB snapshot mismatches are diagnostic and do not invalidate fresh worker results", async () => {
+test("cached PoB snapshot mismatches prevent ranking against the wrong baseline", async () => {
   const source = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /baselineMismatches\.length\)\s*\{\s*throw/);
-  assert.match(source, /baselineDiagnostics:\s*baselineMismatches/);
+  assert.match(source, /baselineMismatches\.length\)\s*\{\s*throw/);
+  assert.match(source, /no candidates were ranked/);
 });
 
 test("worker safely rebinds loaded build sets before calculating", async () => {
   const source = await readFile(new URL("./OptimizerWorker.lua", import.meta.url), "utf8");
-  assert.match(source, /specList\[activeSpec\][\s\S]*SetActiveSpec\(activeSpec\)/);
-  assert.match(source, /SetActiveItemSet\(activeItemSetId\)/);
-  assert.match(source, /SetActiveSkillSet\(activeSkillSetId\)/);
-  assert.match(source, /SetActiveConfigSet\(activeConfigSetId\)[\s\S]*BuildModList\(\)/);
-  assert.match(source, /syncLoadouts = build\.SyncLoadouts[\s\S]*build\.SyncLoadouts = function\(\) end[\s\S]*build\.SyncLoadouts = syncLoadouts/);
-  assert.match(source, /socketGroupList\[mainSocketGroup\][\s\S]*selectedMainGroup\.enabled = true/);
+  assert.match(source, /POB_SOURCE_PATH[\s\S]*GetScriptPath\(\)/);
+  assert.match(source, /function NewFileSearch\(fileName\)[\s\S]*%.bin\$/);
+  assert.match(source, /build\.spec = treeTab\.specList\[activeSpec\]/);
+  assert.match(source, /itemsTab\.activeItemSet = itemsTab\.itemSets\[activeItemSetId\]/);
+  assert.match(source, /slot\.selItemId = savedSlot\.selItemId/);
+  assert.match(source, /skillsTab\.socketGroupList = skillsTab\.skillSets\[activeSkillSetId\]\.socketGroupList/);
+  assert.match(source, /configTab\.input = configTab\.configSets\[activeConfigSetId\]\.input[\s\S]*BuildModList\(\)/);
   assert.match(source, /loadBuildFromXML\(xml, "optimizer"\)[\s\S]*restoreActiveBuildState\(\)[\s\S]*settleCalculations\(\)/);
+});
+
+test("prepares single and split timeless-jewel tables for headless PoB", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pob-timeless-test-"));
+  try {
+    const lethalPride = Buffer.from("lethal-pride-data");
+    const gloriousVanity = deflateSync(Buffer.from("glorious-vanity-data"));
+    await writeFile(join(directory, "LethalPride.zip"), deflateSync(lethalPride));
+    await writeFile(join(directory, "GloriousVanity.zip.part0"), gloriousVanity.subarray(0, 5));
+    await writeFile(join(directory, "GloriousVanity.zip.part1"), gloriousVanity.subarray(5));
+    await prepareTimelessData(directory);
+    assert.deepEqual(await readFile(join(directory, "LethalPride.bin")), lethalPride);
+    assert.equal((await readFile(join(directory, "GloriousVanity.bin"))).toString(), "glorious-vanity-data");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("queues whole evaluations in FIFO order and reports changing positions", async () => {

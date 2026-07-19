@@ -4,7 +4,7 @@ import Image from "next/image";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Circle, Crown, FlaskConical, Footprints, Gem, Hand, Link2, PackageSearch, Shield, Shirt, Sword } from "lucide-react";
 import { Build, EquipmentSlot, Item } from "@/models";
-import { getItemArtworkCandidates } from "@/lib/item-art";
+import { getItemArtworkCandidates, getMagicFlaskBaseType } from "@/lib/item-art";
 import { getSkillGemArtwork } from "@/lib/skill-gem-art";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -25,14 +25,14 @@ const slotLabels: Record<EquipmentSlot, string> = {
 
 const slotLayout: Record<EquipmentSlot, string> = {
   weapon: "col-start-1 col-span-2 row-start-1 row-span-5",
-  offhand: "col-start-9 col-span-2 row-start-1 row-span-5",
+  offhand: "col-start-8 col-span-2 row-start-1 row-span-5",
   helmet: "col-start-4 col-span-3 row-start-1 row-span-2",
   bodyArmour: "col-start-4 col-span-3 row-start-3 row-span-3",
   gloves: "col-start-1 col-span-2 row-start-6 row-span-2",
-  boots: "col-start-9 col-span-2 row-start-6 row-span-2",
-  amulet: "col-start-7 col-span-2 row-start-1",
+  boots: "col-start-8 col-span-2 row-start-6 row-span-2",
+  amulet: "col-start-7 row-start-1",
   ring1: "col-start-3 row-start-3",
-  ring2: "col-start-7 col-span-2 row-start-3",
+  ring2: "col-start-7 row-start-3",
   belt: "col-start-4 col-span-3 row-start-6 row-span-2",
 };
 
@@ -65,7 +65,7 @@ const slotIcons = {
 } satisfies Record<EquipmentSlot, typeof Sword>;
 
 function ItemArtwork({ item, slot }: { item: Item; slot?: EquipmentSlot }) {
-  const candidates = getItemArtworkCandidates(item);
+  const candidates = getItemArtworkCandidates(item, { magicFlaskBase: !slot });
   const [candidateIndex, setCandidateIndex] = useState(0);
   const Icon = slot ? slotIcons[slot] : FlaskConical;
 
@@ -124,6 +124,7 @@ function EquippedItem({ item, slot, reflected, label, layout }: { item: Item; sl
   const rarity = rarityStyles[item.rarity];
   const groups = tooltipGroups(item);
   const displayLabel = label ?? (slot ? slotLabels[slot] : "Flask");
+  const displayBaseType = !slot ? getMagicFlaskBaseType(item) ?? item.baseType : item.baseType;
 
   return <Tooltip>
     <TooltipTrigger asChild>
@@ -137,7 +138,7 @@ function EquippedItem({ item, slot, reflected, label, layout }: { item: Item; sl
           empty ? "border-dashed border-slate-600/45 opacity-55" : cn(rarity.border, rarity.glow),
           layout ?? (slot ? slotLayout[slot] : undefined),
         )}
-        aria-label={`${displayLabel}: ${empty ? "empty" : `${item.name}, ${item.baseType}`}. View all item stats.`}
+        aria-label={`${displayLabel}: ${empty ? "empty" : `${item.name}, ${displayBaseType}`}. View all item stats.`}
       >
         <span className="absolute top-1 left-1.5 z-10 max-w-[calc(100%-0.75rem)] truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.08em] text-sky-100/75 uppercase backdrop-blur-sm">{displayLabel}</span>
         <ItemArtwork key={`${item.id}-${item.name}-${item.baseType}`} item={item} slot={slot} />
@@ -148,7 +149,7 @@ function EquippedItem({ item, slot, reflected, label, layout }: { item: Item; sl
     <TooltipContent side="right" sideOffset={12} collisionPadding={16} className={cn("block w-[24rem] max-w-[calc(100vw-2rem)] items-stretch gap-0 overflow-hidden rounded-xl border bg-[#070d15]/98 p-0 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.85)] backdrop-blur-xl", rarity.border)}>
       <div className={cn("border-b px-5 py-4 text-center", rarity.border, item.rarity === "rare" ? "bg-gradient-to-b from-amber-300/[0.09] to-transparent" : item.rarity === "unique" ? "bg-gradient-to-b from-orange-500/[0.1] to-transparent" : "bg-gradient-to-b from-sky-400/[0.08] to-transparent")}>
         <p className={cn("font-heading text-lg font-semibold tracking-wide", rarity.name)}>{empty ? displayLabel : item.name}</p>
-        <p className="mt-1 text-xs text-slate-400">{item.baseType}</p>
+        <p className="mt-1 text-xs text-slate-400">{displayBaseType}</p>
         {!empty && <div className="mt-2 flex flex-wrap justify-center gap-1.5"><Badge variant="outline" className="h-5 text-[9px] capitalize">{item.rarity}</Badge>{item.itemClass && <Badge variant="outline" className="h-5 text-[9px]">{item.itemClass}</Badge>}{reflected && <Badge className="h-5 bg-sky-400/15 text-[9px] text-sky-200">Kalandra copy</Badge>}</div>}
       </div>
       <div className="max-h-[min(34rem,70vh)] overflow-y-auto overscroll-contain px-3 py-3 text-center text-[11px] leading-[1.45] [scrollbar-color:rgba(125,211,252,0.25)_transparent]">
@@ -214,9 +215,9 @@ export function EquippedInventory({ build }: { build: Build }) {
       </div>
       <div className="overflow-hidden rounded-2xl border border-sky-300/10 bg-[#07111b] p-2 shadow-[inset_0_0_80px_rgba(24,93,130,0.09)] sm:p-3">
         <div className="grid items-start gap-3 md:grid-cols-[minmax(0,3fr)_minmax(200px,1fr)] xl:grid-cols-[minmax(0,760px)_minmax(220px,1fr)]">
-          <div ref={equipmentPanelRef} className="relative aspect-[10/9] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_36%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-3">
+          <div ref={equipmentPanelRef} className="relative aspect-square w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_36%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-3">
             <div aria-hidden="true" className="pointer-events-none absolute top-[8%] bottom-[9%] left-1/2 w-[27%] -translate-x-1/2 rounded-[45%_45%_30%_30%] border border-sky-300/[0.04] bg-sky-300/[0.025] blur-[1px]" />
-            <div className="relative grid size-full grid-cols-10 grid-rows-9 gap-1 sm:gap-1.5">
+            <div className="relative grid size-full grid-cols-9 grid-rows-9 gap-1 sm:gap-1.5">
               {(Object.keys(slotLabels) as EquipmentSlot[]).map((slot) => <EquippedItem key={slot} slot={slot} item={build.equipment[slot]} reflected={build.kalandrasTouch?.touchSlot === slot} />)}
               {(build.flasks ?? []).map((flask, index) => <EquippedItem key={`flask-${index + 1}-${flask.id}`} item={flask} label={`Flask ${index + 1}`} layout={flaskLayouts[index]} />)}
             </div>
