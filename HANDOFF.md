@@ -10,6 +10,7 @@ Last updated: 2026-07-19
 - The local item-art index covers 955 base items and 871 unique items.
 - Item artwork can be refreshed with `npm.cmd run sync:item-art`.
 - The PoE Wiki image failure was caused by its server returning an anti-bot HTML page instead of the requested PNG.
+- Equipped-item detail popovers hide internal `Unique ID` and `ArmourBasePercentile` fields, remove `{crafted}` markup, and group imported stats into cleaner bordered sections.
 
 ## Verification
 
@@ -21,6 +22,8 @@ Reported by the previous Codex session:
 - Production build passed.
 
 These results have not been rerun in the current session.
+
+The item-popover change still needs lint, typecheck, tests, and a production build run. They could not run in the current desktop environment because Node/npm and `node_modules` were unavailable; an attempted dependency install did not complete.
 
 ## Deployment
 
