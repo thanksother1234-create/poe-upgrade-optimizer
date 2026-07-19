@@ -1,0 +1,212 @@
+name: Codex issue assistant
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  codex:
+    if: >-
+      github.event.issue.pull_request == null &&
+      github.event.comment.author_association == 'OWNER' &&
+      (startsWith(github.event.comment.body, '/codex') ||
+      startsWith(github.event.comment.body, '@codex'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      has_patch: ${{ steps.diff.outputs.has_patch }}
+
+    steps:
+      - name: Check out the production branch without write credentials
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies before the network-restricted Codex step
+        run: npm ci
+
+      - name: Run Codex
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":workspace"
+          model: gpt-5.6-sol
+          effort: medium
+          output-file: ${{ runner.temp }}/codex-final.md
+          prompt: |
+            You are working on GitHub issue #${{ github.event.issue.number }} in ${{ github.repository }}.
+
+            Repository owner request:
+            ----
+            ${{ github.event.comment.body }}
+
+            Issue title and original description:
+            ----
+            ${{ github.event.issue.title }}
+            ${{ github.event.issue.body }}
+
+            Inspect the repository and follow its AGENTS.md instructions. If the request asks for
+            a code change, implement the smallest complete and safe change and run the relevant
+            repository checks. If it only asks a question, answer it without changing files.
+
+            Do not deploy, merge, push, change secrets, access external services, or perform
+            destructive operations. Summarize changes, verification, and any blocker in your final
+            response. All code changes will be presented to the owner in a pull request for review.
+
+      - name: Package the proposed changes
+        id: diff
+        shell: bash
+        run: |
+          git add -N .
+          git diff --binary HEAD > codex.patch
+          if [ -s codex.patch ]; then
+            echo "has_patch=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_patch=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -s "$RUNNER_TEMP/codex-final.md" ]; then
+            cp "$RUNNER_TEMP/codex-final.md" codex-final.md
+          else
+            printf '%s\n' 'Codex completed without returning a written summary.' > codex-final.md
+          fi
+
+      - name: Save the response and patch for the publishing job
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-issue-${{ github.event.issue.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            codex-final.md
+            codex.patch
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: codex
+    if: needs.codex.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Check out the production branch
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download the isolated Codex result
+        uses: actions/download-artifact@v5
+        with:
+          name: codex-issue-${{ github.event.issue.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Open a pull request for proposed changes
+        if: needs.codex.outputs.has_patch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          git apply --index codex.patch
+          branch="codex/issue-${ISSUE_NUMBER}-${RUN_ID}-${RUN_ATTEMPT}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -m "Address issue #${ISSUE_NUMBER} with Codex"
+          git push origin "$branch"
+
+          {
+            echo "Codex generated this change from issue #${ISSUE_NUMBER}."
+            echo
+            echo "Review the code and successful checks before merging."
+            echo
+            echo "Closes #${ISSUE_NUMBER}"
+          } > codex-pr-body.md
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "Codex changes for issue #${ISSUE_NUMBER}" \
+            --body-file codex-pr-body.md > codex-pr-url.txt
+
+      - name: Post the result back to the issue
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          HAS_PATCH: ${{ needs.codex.outputs.has_patch }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require("node:fs");
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const summary = fs.readFileSync("codex-final.md", "utf8").trim();
+            const prUrl = fs.existsSync("codex-pr-url.txt")
+              ? fs.readFileSync("codex-pr-url.txt", "utf8").trim()
+              : "";
+
+            let body = `### Codex result\n\n${summary}`;
+            if (prUrl) {
+              body += `\n\nProposed changes: ${prUrl}`;
+            } else if (process.env.HAS_PATCH === "true") {
+              body += "\n\nCodex produced changes, but a pull request could not be created.";
+            } else {
+              body += "\n\nNo repository files were changed.";
+            }
+
+            if (body.length > 65_000) {
+              body = `${body.slice(0, 64_900)}\n\n_Response shortened to fit GitHub's comment limit._`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body,
+            });
+
+  report_failure:
+    needs: codex
+    if: always() && needs.codex.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Report the failed run
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body: `### Codex run failed\n\nCheck the [GitHub Actions log](${process.env.RUN_URL}). A missing or invalid \`OPENAI_API_KEY\` is the most common setup failure.`,
+            });

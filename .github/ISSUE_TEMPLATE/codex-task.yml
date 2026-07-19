@@ -1,0 +1,29 @@
+name: Codex task
+description: Request repository work from a phone or another browser.
+title: "[Codex] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the outcome you want. After submitting the issue, add a comment beginning with `/codex` to start the assistant.
+
+  - type: textarea
+    id: request
+    attributes:
+      label: Requested outcome
+      description: Explain what should change or what you want investigated.
+      placeholder: Make the optimizer show an explicit reason when a candidate cannot be equipped.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      description: Add any behavior or tests that must be preserved.
+      placeholder: Existing builds must still import, and the test suite must pass.
+
+  - type: markdown
+    attributes:
+      value: |
+        When the issue is created, comment `/codex implement this issue` to run Codex. Only the repository owner can trigger the workflow.

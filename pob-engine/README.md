@@ -63,6 +63,12 @@ Do not add a trailing `/evaluate` to `POB_ENGINE_URL`; the web app appends that 
 
 Run the same `npm.cmd run deploy:engine:hf -- ...` command whenever files in this directory change. The uploader sends the contents of `pob-engine` to the root of the Space repository, which is required for Hugging Face to find `Dockerfile` and this README metadata.
 
+## Automatic deployment from GitHub
+
+The repository's `deploy-pob-engine.yml` GitHub Actions workflow uploads this directory to the production Hugging Face Space whenever an engine change reaches `main`. Pull requests are validated separately and never replace the production engine before merge.
+
+Create a fine-grained Hugging Face token with write access to only `rigriffin/poe-upgrade-optimizer-engine`, then save it in the GitHub repository as an Actions secret named `HF_TOKEN`. The workflow can also be started manually from the repository's **Actions** tab.
+
 ## Run locally
 
 Install Docker Desktop, then run from this directory:
