@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { Circle, Crown, Footprints, Gem, Hand, Link2, PackageSearch, Shield, Shirt, Sword } from "lucide-react";
+import { Circle, Crown, FlaskConical, Footprints, Gem, Hand, Link2, PackageSearch, Shield, Shirt, Sword } from "lucide-react";
 import { Build, EquipmentSlot, Item } from "@/models";
 import { getItemArtworkCandidates } from "@/lib/item-art";
 import { getSkillGemArtwork } from "@/lib/skill-gem-art";
@@ -24,17 +24,25 @@ const slotLabels: Record<EquipmentSlot, string> = {
 };
 
 const slotLayout: Record<EquipmentSlot, string> = {
-  weapon: "col-start-1 col-span-2 row-start-1 row-span-4",
-  offhand: "col-start-7 col-span-2 row-start-1 row-span-4",
-  helmet: "col-start-4 col-span-2 row-start-1 row-span-2",
-  bodyArmour: "col-start-4 col-span-2 row-start-3 row-span-3",
-  gloves: "col-start-1 col-span-2 row-start-5 row-span-2",
-  boots: "col-start-7 col-span-2 row-start-5 row-span-2",
-  amulet: "col-start-6 row-start-1",
+  weapon: "col-start-1 col-span-2 row-start-1 row-span-5",
+  offhand: "col-start-9 col-span-2 row-start-1 row-span-5",
+  helmet: "col-start-4 col-span-3 row-start-1 row-span-2",
+  bodyArmour: "col-start-4 col-span-3 row-start-3 row-span-3",
+  gloves: "col-start-1 col-span-2 row-start-6 row-span-2",
+  boots: "col-start-9 col-span-2 row-start-6 row-span-2",
+  amulet: "col-start-7 row-start-1",
   ring1: "col-start-3 row-start-3",
-  ring2: "col-start-6 row-start-3",
-  belt: "col-start-4 col-span-2 row-start-6",
+  ring2: "col-start-7 row-start-3",
+  belt: "col-start-4 col-span-3 row-start-6 row-span-2",
 };
+
+const flaskLayouts = [
+  "col-start-1 col-span-2 row-start-8 row-span-2",
+  "col-start-3 col-span-2 row-start-8 row-span-2",
+  "col-start-5 col-span-2 row-start-8 row-span-2",
+  "col-start-7 col-span-2 row-start-8 row-span-2",
+  "col-start-9 col-span-2 row-start-8 row-span-2",
+];
 
 const rarityStyles: Record<Item["rarity"], { border: string; glow: string; name: string }> = {
   normal: { border: "border-slate-500/50", glow: "shadow-slate-950/30", name: "text-slate-200" },
@@ -56,10 +64,10 @@ const slotIcons = {
   belt: PackageSearch,
 } satisfies Record<EquipmentSlot, typeof Sword>;
 
-function ItemArtwork({ item, slot }: { item: Item; slot: EquipmentSlot }) {
+function ItemArtwork({ item, slot }: { item: Item; slot?: EquipmentSlot }) {
   const candidates = getItemArtworkCandidates(item);
   const [candidateIndex, setCandidateIndex] = useState(0);
-  const Icon = slotIcons[slot];
+  const Icon = slot ? slotIcons[slot] : FlaskConical;
 
   const source = candidates[candidateIndex];
   if (!source) return <Icon aria-hidden="true" className="size-8 text-sky-200/30" />;
@@ -111,10 +119,11 @@ function tooltipGroups(item: Item) {
   return groups.filter((group) => group.length > 0);
 }
 
-function EquippedItem({ item, slot, reflected }: { item: Item; slot: EquipmentSlot; reflected: boolean }) {
+function EquippedItem({ item, slot, reflected, label, layout }: { item: Item; slot?: EquipmentSlot; reflected?: boolean; label?: string; layout?: string }) {
   const empty = item.id.startsWith("empty-");
   const rarity = rarityStyles[item.rarity];
   const groups = tooltipGroups(item);
+  const displayLabel = label ?? (slot ? slotLabels[slot] : "Flask");
 
   return <Tooltip>
     <TooltipTrigger asChild>
@@ -126,11 +135,11 @@ function EquippedItem({ item, slot, reflected }: { item: Item; slot: EquipmentSl
           "hover:z-10 hover:-translate-y-0.5 hover:border-sky-300/80 hover:bg-[#142433] focus-visible:z-10 focus-visible:border-sky-300 focus-visible:ring-2 focus-visible:ring-sky-300/35",
           "shadow-[inset_0_0_24px_rgba(0,0,0,0.58),0_8px_20px_-12px_rgba(0,0,0,0.95)]",
           empty ? "border-dashed border-slate-600/45 opacity-55" : cn(rarity.border, rarity.glow),
-          slotLayout[slot],
+          layout ?? (slot ? slotLayout[slot] : undefined),
         )}
-        aria-label={`${slotLabels[slot]}: ${empty ? "empty" : `${item.name}, ${item.baseType}`}. View all item stats.`}
+        aria-label={`${displayLabel}: ${empty ? "empty" : `${item.name}, ${item.baseType}`}. View all item stats.`}
       >
-        <span className="absolute top-1 left-1.5 z-10 max-w-[calc(100%-0.75rem)] truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.08em] text-sky-100/75 uppercase backdrop-blur-sm">{slotLabels[slot]}</span>
+        <span className="absolute top-1 left-1.5 z-10 max-w-[calc(100%-0.75rem)] truncate rounded bg-slate-950/75 px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.08em] text-sky-100/75 uppercase backdrop-blur-sm">{displayLabel}</span>
         <ItemArtwork key={`${item.id}-${item.name}-${item.baseType}`} item={item} slot={slot} />
         {!empty && <span className={cn("absolute right-1.5 bottom-1 left-1.5 z-10 truncate rounded bg-slate-950/80 px-1 py-0.5 text-center text-[8px] font-semibold backdrop-blur-sm", rarity.name)}>{item.name}</span>}
         {reflected && <span className="absolute top-1 right-1 z-20 rounded-full border border-sky-300/30 bg-sky-950/90 px-1.5 py-0.5 text-[7px] font-bold tracking-wide text-sky-200 uppercase">Mirrored</span>}
@@ -138,7 +147,7 @@ function EquippedItem({ item, slot, reflected }: { item: Item; slot: EquipmentSl
     </TooltipTrigger>
     <TooltipContent side="right" sideOffset={12} collisionPadding={16} className={cn("block w-[24rem] max-w-[calc(100vw-2rem)] items-stretch gap-0 overflow-hidden rounded-xl border bg-[#070d15]/98 p-0 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.85)] backdrop-blur-xl", rarity.border)}>
       <div className={cn("border-b px-5 py-4 text-center", rarity.border, item.rarity === "rare" ? "bg-gradient-to-b from-amber-300/[0.09] to-transparent" : item.rarity === "unique" ? "bg-gradient-to-b from-orange-500/[0.1] to-transparent" : "bg-gradient-to-b from-sky-400/[0.08] to-transparent")}>
-        <p className={cn("font-heading text-lg font-semibold tracking-wide", rarity.name)}>{empty ? slotLabels[slot] : item.name}</p>
+        <p className={cn("font-heading text-lg font-semibold tracking-wide", rarity.name)}>{empty ? displayLabel : item.name}</p>
         <p className="mt-1 text-xs text-slate-400">{item.baseType}</p>
         {!empty && <div className="mt-2 flex flex-wrap justify-center gap-1.5"><Badge variant="outline" className="h-5 text-[9px] capitalize">{item.rarity}</Badge>{item.itemClass && <Badge variant="outline" className="h-5 text-[9px]">{item.itemClass}</Badge>}{reflected && <Badge className="h-5 bg-sky-400/15 text-[9px] text-sky-200">Kalandra copy</Badge>}</div>}
       </div>
@@ -201,14 +210,15 @@ export function EquippedInventory({ build }: { build: Build }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
         <div><p className="text-sm font-medium text-foreground">Active equipment set</p><p className="mt-0.5 text-xs text-muted-foreground">Hover an item to see every imported stat line.</p></div>
-        <Badge variant="outline" className="border-sky-400/25 bg-sky-400/5 text-sky-200">{Object.values(build.equipment).filter((item) => !item.id.startsWith("empty-")).length} items equipped</Badge>
+        <Badge variant="outline" className="border-sky-400/25 bg-sky-400/5 text-sky-200">{[...Object.values(build.equipment), ...(build.flasks ?? [])].filter((item) => !item.id.startsWith("empty-")).length} items equipped</Badge>
       </div>
       <div className="overflow-hidden rounded-2xl border border-sky-300/10 bg-[#07111b] p-2 shadow-[inset_0_0_80px_rgba(24,93,130,0.09)] sm:p-3">
         <div className="grid items-start gap-3 md:grid-cols-[minmax(0,3fr)_minmax(200px,1fr)] xl:grid-cols-[minmax(0,760px)_minmax(220px,1fr)]">
-          <div ref={equipmentPanelRef} className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-3">
+          <div ref={equipmentPanelRef} className="relative aspect-[10/9] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_36%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-3">
             <div aria-hidden="true" className="pointer-events-none absolute top-[8%] bottom-[9%] left-1/2 w-[27%] -translate-x-1/2 rounded-[45%_45%_30%_30%] border border-sky-300/[0.04] bg-sky-300/[0.025] blur-[1px]" />
-            <div className="relative grid size-full grid-cols-8 grid-rows-6 gap-1 sm:gap-1.5">
+            <div className="relative grid size-full grid-cols-10 grid-rows-9 gap-1 sm:gap-1.5">
               {(Object.keys(slotLabels) as EquipmentSlot[]).map((slot) => <EquippedItem key={slot} slot={slot} item={build.equipment[slot]} reflected={build.kalandrasTouch?.touchSlot === slot} />)}
+              {(build.flasks ?? []).map((flask, index) => <EquippedItem key={`flask-${index + 1}-${flask.id}`} item={flask} label={`Flask ${index + 1}`} layout={flaskLayouts[index]} />)}
             </div>
           </div>
           <SkillGemPanel build={build} equipmentHeight={equipmentHeight} />
