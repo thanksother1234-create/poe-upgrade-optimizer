@@ -10,8 +10,9 @@ describe("ExactPobCalculationService", () => {
     const baseline = structuredClone(mockBuild.metrics);
     const improved = { ...baseline, totalDps: baseline.totalDps + 100_000, effectiveHitPool: baseline.effectiveHitPool + 2_000 };
     const fetchMock = vi.fn(async (_url: URL, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as { scenarios: { id: string; replacements: { rawText: string }[] }[] };
+      const request = JSON.parse(String(init?.body)) as { expectedBaseline: unknown; scenarios: { id: string; replacements: { rawText: string }[] }[] };
       expect(init?.headers).toMatchObject({ Authorization: "Bearer secret" });
+      expect(request.expectedBaseline).toEqual(baseline);
       expect(request.scenarios[0].replacements[0].rawText).toContain("Verified Ring");
       return Response.json({ engineVersion: "v2.65.0", dpsMetric: "FullDPS", baseline, results: [{ id: request.scenarios[0].id, metrics: improved }] });
     });

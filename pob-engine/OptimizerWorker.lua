@@ -82,6 +82,52 @@ local function metrics(output)
 	}, dpsMetric
 end
 
+local function metricSignature(output)
+	local values, metricName = metrics(output)
+	for index, value in ipairs(values) do
+		values[index] = string.format("%.10g", value)
+	end
+	return metricName .. "\t" .. table.concat(values, "\t")
+end
+
+local function settleCalculations()
+	-- Loading restores these selectors from XML. Re-applying them makes every tab
+	-- publish its active state before the forced calculation rebuild.
+	if build.treeTab and build.treeTab.activeSpec then
+		build.treeTab:SetActiveSpec(build.treeTab.activeSpec)
+	end
+	if build.itemsTab and build.itemsTab.activeItemSetId then
+		build.itemsTab:SetActiveItemSet(build.itemsTab.activeItemSetId)
+	end
+	if build.skillsTab and build.skillsTab.activeSkillSetId then
+		build.skillsTab:SetActiveSkillSet(build.skillsTab.activeSkillSetId)
+	end
+	if build.configTab and build.configTab.activeConfigSetId then
+		build.configTab:SetActiveConfigSet(build.configTab.activeConfigSetId)
+	end
+
+	build.buildFlag = true
+	local previous
+	local stableFrames = 0
+	for _ = 1, 30 do
+		runCallback("OnFrame")
+		local output = build.calcsTab and build.calcsTab.mainOutput
+		if output and not build.buildFlag then
+			local signature = metricSignature(output)
+			if signature == previous then
+				stableFrames = stableFrames + 1
+				if stableFrames >= 3 then
+					return output
+				end
+			else
+				previous = signature
+				stableFrames = 0
+			end
+		end
+	end
+	return build.calcsTab and build.calcsTab.mainOutput
+end
+
 local function verifyEquippedItems()
 	local itemSet = build and build.itemsTab and build.itemsTab.activeItemSet
 	local items = build and build.itemsTab and build.itemsTab.items
@@ -133,10 +179,7 @@ local xml = file:read("*a")
 file:close()
 local ok, errorMessage = pcall(function()
 	loadBuildFromXML(xml, "optimizer")
-	-- Let deferred calculation callbacks settle before metrics are read.
-	for _ = 1, 3 do
-		runCallback("OnFrame")
-	end
+	settleCalculations()
 end)
 local output = build and build.calcsTab and build.calcsTab.mainOutput
 if not ok or not output then

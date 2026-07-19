@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Circle, Crown, Footprints, Gem, Hand, Link2, PackageSearch, Shield, Shirt, Sword } from "lucide-react";
 import { Build, EquipmentSlot, Item } from "@/models";
 import { getItemArtworkCandidates } from "@/lib/item-art";
@@ -150,9 +150,10 @@ function EquippedItem({ item, slot, reflected }: { item: Item; slot: EquipmentSl
   </Tooltip>;
 }
 
-function SkillGemPanel({ build }: { build: Build }) {
+function SkillGemPanel({ build, equipmentHeight }: { build: Build; equipmentHeight?: number }) {
   const groups = build.skillGroups ?? [];
-  return <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-300/10 bg-[linear-gradient(180deg,rgba(16,31,44,0.94),rgba(5,13,21,0.98))] shadow-[inset_0_0_45px_rgba(24,93,130,0.08)]">
+  const heightStyle = equipmentHeight ? { "--equipment-panel-height": `${equipmentHeight}px` } as CSSProperties : undefined;
+  return <aside style={heightStyle} className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-300/10 bg-[linear-gradient(180deg,rgba(16,31,44,0.94),rgba(5,13,21,0.98))] shadow-[inset_0_0_45px_rgba(24,93,130,0.08)] md:h-[var(--equipment-panel-height)]">
     <div className="border-b border-sky-300/10 px-4 py-3">
       <div className="flex items-center gap-2"><Gem className="size-4 text-sky-300" /><p className="text-sm font-semibold text-sky-100">Skills & supports</p></div>
       <p className="mt-1 text-[10px] leading-4 text-slate-500">Linked gems from your active PoB skill set</p>
@@ -178,11 +179,24 @@ function SkillGemArtwork({ name, isSupport }: { name: string; isSupport: boolean
   const [failed, setFailed] = useState(false);
   const source = getSkillGemArtwork(name);
   return <span className={cn("relative grid size-7 shrink-0 place-items-center overflow-hidden rounded-md border", isSupport ? "border-sky-300/45 bg-sky-400/10 text-sky-300" : "border-emerald-300/45 bg-emerald-400/10 text-emerald-300")}>
-    {source && !failed ? <Image src={source} alt={`${name} gem artwork`} width={28} height={28} unoptimized className="size-full object-cover" onError={() => setFailed(true)} /> : <Gem className="size-3" />}
+    {source && !failed ? <Image src={source} alt={`${name} skill icon`} width={101} height={47} unoptimized className="absolute top-0 left-0 h-full w-auto max-w-none" onError={() => setFailed(true)} /> : <Gem className="size-4" />}
   </span>;
 }
 
 export function EquippedInventory({ build }: { build: Build }) {
+  const equipmentPanelRef = useRef<HTMLDivElement>(null);
+  const [equipmentHeight, setEquipmentHeight] = useState<number>();
+
+  useEffect(() => {
+    const panel = equipmentPanelRef.current;
+    if (!panel) return;
+    const updateHeight = () => setEquipmentHeight(Math.round(panel.getBoundingClientRect().height));
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
+
   return <TooltipProvider delayDuration={140}>
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
@@ -190,14 +204,14 @@ export function EquippedInventory({ build }: { build: Build }) {
         <Badge variant="outline" className="border-sky-400/25 bg-sky-400/5 text-sky-200">{Object.values(build.equipment).filter((item) => !item.id.startsWith("empty-")).length} items equipped</Badge>
       </div>
       <div className="overflow-hidden rounded-2xl border border-sky-300/10 bg-[#07111b] p-2 shadow-[inset_0_0_80px_rgba(24,93,130,0.09)] sm:p-3">
-        <div className="grid items-stretch gap-3 md:grid-cols-[minmax(0,3fr)_minmax(200px,1fr)] xl:grid-cols-[minmax(0,760px)_minmax(220px,1fr)]">
-          <div className="relative aspect-[7/6] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-3">
+        <div className="grid items-start gap-3 md:grid-cols-[minmax(0,3fr)_minmax(200px,1fr)] xl:grid-cols-[minmax(0,760px)_minmax(220px,1fr)]">
+          <div ref={equipmentPanelRef} className="relative aspect-[7/6] w-full overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-3">
             <div aria-hidden="true" className="pointer-events-none absolute top-[8%] bottom-[9%] left-1/2 w-[27%] -translate-x-1/2 rounded-[45%_45%_30%_30%] border border-sky-300/[0.04] bg-sky-300/[0.025] blur-[1px]" />
             <div className="relative grid size-full grid-cols-7 grid-rows-6 gap-1 sm:gap-1.5">
               {(Object.keys(slotLabels) as EquipmentSlot[]).map((slot) => <EquippedItem key={slot} slot={slot} item={build.equipment[slot]} reflected={build.kalandrasTouch?.touchSlot === slot} />)}
             </div>
           </div>
-          <SkillGemPanel build={build} />
+          <SkillGemPanel build={build} equipmentHeight={equipmentHeight} />
         </div>
       </div>
     </div>
