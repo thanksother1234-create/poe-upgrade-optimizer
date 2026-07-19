@@ -14,6 +14,15 @@ describe("getSkillGemArtwork", () => {
     );
   });
 
+  it("resolves PoB support names that omit the Support suffix", () => {
+    expect(getSkillGemArtwork("Faster Attacks", true)).toContain(
+      "/Art/2DItems/Gems/Support/FasterAttacks.png",
+    );
+    expect(getSkillGemArtwork("Momentum", true)).toContain(
+      "/Art/2DItems/Gems/Support/MomentumSupportGem.png",
+    );
+  });
+
   it("falls back when a gem is missing from the index", () => {
     expect(getSkillGemArtwork("Definitely Not A Gem")).toBeUndefined();
   });

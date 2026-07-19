@@ -17,6 +17,7 @@ Last updated: 2026-07-19
 - Active and support gems use direct PoE CDN artwork when available, with the generic gem glyph as an image-failure fallback. The local index currently covers 601 gems, and `npm.cmd run sync:item-art` refreshes both equipment and skill-gem art indexes.
 - The hosted PoB worker now re-applies every active build selector, forces a clean calculation, and waits for three stable metric frames (up to 30) before reading results. It validates DPS mode and key baseline metrics against the imported snapshot within 2%; mismatched builds return a clear error instead of misleading rankings. Successful engine baselines become the build-summary values.
 - The skill panel no longer controls the equipment grid's height: a resize observer locks the scrollable gem panel to the equipment panel's natural 7-by-6 aspect ratio. CDN gem sprites are cropped to their right-side inventory gem artwork (the same style shown by PoE Wiki), with the generic glyph retained as a failure fallback.
+- Support artwork lookup handles PoB's shortened names by retrying with the inventory-name `Support` suffix (for example, `Faster Attacks` resolves as `Faster Attacks Support`). Inventory gem sprite crops are horizontally centered in their frames.
 
 ## Verification
 

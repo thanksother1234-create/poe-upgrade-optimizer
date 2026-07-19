@@ -177,9 +177,9 @@ function SkillGemPanel({ build, equipmentHeight }: { build: Build; equipmentHeig
 
 function SkillGemArtwork({ name, isSupport }: { name: string; isSupport: boolean }) {
   const [failed, setFailed] = useState(false);
-  const source = getSkillGemArtwork(name);
+  const source = getSkillGemArtwork(name, isSupport);
   return <span className={cn("relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg border", isSupport ? "border-sky-300/45 bg-sky-400/10 text-sky-300" : "border-emerald-300/45 bg-emerald-400/10 text-emerald-300")}>
-    {source && !failed ? <Image src={source} alt={`${name} inventory gem artwork`} width={101} height={47} unoptimized className="absolute top-1/2 right-0 h-[146%] w-auto max-w-none -translate-y-1/2" onError={() => setFailed(true)} /> : <Gem className="size-4" />}
+    {source && !failed ? <Image src={source} alt={`${name} inventory gem artwork`} width={101} height={47} unoptimized className="absolute top-1/2 -right-1 h-[146%] w-auto max-w-none -translate-y-1/2" onError={() => setFailed(true)} /> : <Gem className="size-4" />}
   </span>;
 }
 
