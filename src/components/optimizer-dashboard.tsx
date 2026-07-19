@@ -510,7 +510,7 @@ export default function OptimizerDashboard() {
 
         {build.kalandrasTouch && <Alert className="border-sky-400/25 bg-sky-400/[0.06]"><Copy className="text-sky-300" /><AlertTitle>Kalandra&apos;s Touch detected</AlertTitle><AlertDescription>{slotLabels[build.kalandrasTouch.touchSlot]} is shown as a second copy of {slotLabels[build.kalandrasTouch.sourceSlot]}. Every ring candidate will be duplicated into both ring slots during the PoB comparison.</AlertDescription></Alert>}
 
-        <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
+        <div className="space-y-4">
           <Card className="overflow-hidden border-white/[0.07] bg-card/90 shadow-[0_24px_60px_-48px_rgba(0,0,0,0.95)]"><CardHeader className="border-b border-border/70"><SectionHeading number="2" eyebrow="Review" title="What you&apos;re wearing" icon={PackageSearch} /></CardHeader><CardContent className="pt-6"><EquippedInventory build={build} /></CardContent></Card>
 
           <Card className="border-white/[0.07] bg-card/90 shadow-[0_24px_60px_-48px_rgba(0,0,0,0.95)]"><CardHeader><SectionHeading number="3" eyebrow="Preferences" title="What are you looking for?" icon={Activity} /></CardHeader><CardContent className="space-y-6">
