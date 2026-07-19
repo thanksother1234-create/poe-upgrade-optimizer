@@ -12,16 +12,16 @@ const item = (overrides: Partial<Item> = {}): Item => ({
 });
 
 describe("getItemArtworkCandidates", () => {
-  it("uses the shared Geodesic Ring artwork for a Helical Ring", () => {
+  it("uses the official CDN artwork for a Helical Ring", () => {
     expect(getItemArtworkCandidates(item())).toEqual([
-      "https://www.poewiki.net/wiki/Special:Redirect/file/Geodesic_Ring_inventory_icon.png",
+      "https://web.poecdn.com/image/Art/2DItems/Rings/HeistRing1Dark.png?scale=1&w=1&h=1",
     ]);
   });
 
   it("tries exact unique artwork before the base artwork", () => {
     expect(getItemArtworkCandidates(item({ name: "Mageblood", baseType: "Heavy Belt", rarity: "unique" }))).toEqual([
-      "https://www.poewiki.net/wiki/Special:Redirect/file/Mageblood_inventory_icon.png",
-      "https://www.poewiki.net/wiki/Special:Redirect/file/Heavy_Belt_inventory_icon.png",
+      "https://web.poecdn.com/image/Art/2DItems/Belts/InjectorBelt.png?scale=1&w=2&h=1",
+      "https://web.poecdn.com/image/Art/2DItems/Belts/Belt5.png?scale=1&w=2&h=1",
     ]);
   });
 

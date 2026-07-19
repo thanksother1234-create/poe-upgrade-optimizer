@@ -135,10 +135,10 @@ export function EquippedInventory({ build }: { build: Build }) {
         <div><p className="text-sm font-medium text-foreground">Active equipment set</p><p className="mt-0.5 text-xs text-muted-foreground">Hover an item to see every imported stat line.</p></div>
         <Badge variant="outline" className="border-sky-400/25 bg-sky-400/5 text-sky-200">{Object.values(build.equipment).filter((item) => !item.id.startsWith("empty-")).length} items equipped</Badge>
       </div>
-      <div className="overflow-x-auto rounded-2xl border border-sky-300/10 bg-[#07111b] p-2 shadow-[inset_0_0_80px_rgba(24,93,130,0.09)]">
-        <div className="relative mx-auto aspect-[8/7] w-full min-w-[560px] max-w-[680px] overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-5">
+      <div className="overflow-hidden rounded-2xl border border-sky-300/10 bg-[#07111b] p-2 shadow-[inset_0_0_80px_rgba(24,93,130,0.09)] sm:p-3">
+        <div className="relative mx-auto aspect-[8/7] w-full max-w-[760px] overflow-hidden rounded-xl border border-slate-700/40 bg-[linear-gradient(rgba(73,118,145,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(73,118,145,0.045)_1px,transparent_1px),radial-gradient(circle_at_50%_42%,rgba(32,91,123,0.22),transparent_34%),linear-gradient(145deg,#101d29,#071019_70%)] bg-[size:32px_32px,32px_32px,auto,auto] p-2 sm:p-4">
           <div aria-hidden="true" className="pointer-events-none absolute top-[8%] bottom-[9%] left-1/2 w-[27%] -translate-x-1/2 rounded-[45%_45%_30%_30%] border border-sky-300/[0.04] bg-sky-300/[0.025] blur-[1px]" />
-          <div className="relative grid size-full grid-cols-8 grid-rows-7 gap-2">
+          <div className="relative grid size-full grid-cols-8 grid-rows-7 gap-1 sm:gap-2">
             {(Object.keys(slotLabels) as EquipmentSlot[]).map((slot) => <EquippedItem key={slot} slot={slot} item={build.equipment[slot]} reflected={build.kalandrasTouch?.touchSlot === slot} />)}
           </div>
         </div>
