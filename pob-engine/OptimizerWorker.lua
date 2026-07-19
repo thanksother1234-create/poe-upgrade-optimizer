@@ -95,6 +95,12 @@ local function restoreActiveBuildState()
 	-- calculation-facing references still pointing at their initial defaults.
 	-- Rebind only sets that are present; the tree guard avoids the legacy
 	-- no-curSpec crash that an unconditional SetActiveSpec call caused.
+	-- Every PoB setter finishes by syncing the visual loadout dropdown. That
+	-- UI-only sync assumes all linked set titles exist and crashes in headless
+	-- mode for otherwise valid builds, so suppress it only during rebinding.
+	local syncLoadouts = build.SyncLoadouts
+	build.SyncLoadouts = function() end
+
 	local treeTab = build and build.treeTab
 	local activeSpec = treeTab and treeTab.activeSpec
 	if activeSpec and treeTab.specList and treeTab.specList[activeSpec] then
@@ -119,6 +125,7 @@ local function restoreActiveBuildState()
 		configTab:SetActiveConfigSet(activeConfigSetId)
 		configTab:BuildModList()
 	end
+	build.SyncLoadouts = syncLoadouts
 
 	build.modFlag = true
 	build.buildFlag = true

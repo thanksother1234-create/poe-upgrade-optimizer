@@ -87,6 +87,7 @@ test("worker safely rebinds loaded build sets before calculating", async () => {
   assert.match(source, /SetActiveItemSet\(activeItemSetId\)/);
   assert.match(source, /SetActiveSkillSet\(activeSkillSetId\)/);
   assert.match(source, /SetActiveConfigSet\(activeConfigSetId\)[\s\S]*BuildModList\(\)/);
+  assert.match(source, /syncLoadouts = build\.SyncLoadouts[\s\S]*build\.SyncLoadouts = function\(\) end[\s\S]*build\.SyncLoadouts = syncLoadouts/);
   assert.match(source, /loadBuildFromXML\(xml, "optimizer"\)[\s\S]*restoreActiveBuildState\(\)[\s\S]*settleCalculations\(\)/);
 });
 
