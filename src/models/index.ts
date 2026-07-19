@@ -12,10 +12,9 @@ export type DpsMetric = "FullDPS" | "CombinedDPS" | "MinionCombinedDPS" | "Total
 export interface CurrencyAmount { amount: number; currency: CurrencyUnit }
 export interface ItemModifier { label: string; value: number; metric?: keyof BuildMetrics }
 export type ItemRarity = "normal" | "magic" | "rare" | "unique";
-export interface Item { id: string; name: string; baseType: string; itemClass?: string; rarity: ItemRarity; modifiers: ItemModifier[]; rawText?: string }
+export interface Item { id: string; name: string; baseType: string; itemClass?: string; rarity: ItemRarity; modifiers: ItemModifier[]; rawText?: string; imageUrl?: string }
 export interface TradeItem extends Item {
   slot: EquipmentSlot;
-  imageUrl?: string;
   price: CurrencyAmount;
   tradeUrl?: string;
 }
