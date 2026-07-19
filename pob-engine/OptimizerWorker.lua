@@ -90,6 +90,40 @@ local function metricSignature(output)
 	return metricName .. "\t" .. table.concat(values, "\t")
 end
 
+local function restoreActiveBuildState()
+	-- Headless mode can finish XML loading with the set ids restored but the
+	-- calculation-facing references still pointing at their initial defaults.
+	-- Rebind only sets that are present; the tree guard avoids the legacy
+	-- no-curSpec crash that an unconditional SetActiveSpec call caused.
+	local treeTab = build and build.treeTab
+	local activeSpec = treeTab and treeTab.activeSpec
+	if activeSpec and treeTab.specList and treeTab.specList[activeSpec] then
+		treeTab:SetActiveSpec(activeSpec)
+	end
+
+	local itemsTab = build and build.itemsTab
+	local activeItemSetId = itemsTab and itemsTab.activeItemSetId
+	if activeItemSetId and itemsTab.itemSets and itemsTab.itemSets[activeItemSetId] then
+		itemsTab:SetActiveItemSet(activeItemSetId)
+	end
+
+	local skillsTab = build and build.skillsTab
+	local activeSkillSetId = skillsTab and skillsTab.activeSkillSetId
+	if activeSkillSetId and skillsTab.skillSets and skillsTab.skillSets[activeSkillSetId] then
+		skillsTab:SetActiveSkillSet(activeSkillSetId)
+	end
+
+	local configTab = build and build.configTab
+	local activeConfigSetId = configTab and configTab.activeConfigSetId
+	if activeConfigSetId and configTab.configSets and configTab.configSets[activeConfigSetId] then
+		configTab:SetActiveConfigSet(activeConfigSetId)
+		configTab:BuildModList()
+	end
+
+	build.modFlag = true
+	build.buildFlag = true
+end
+
 local function settleCalculations()
 	-- loadBuildFromXML restores the active tree, item, skill, and config sets.
 	-- Re-running their setters is unsafe for builds whose legacy tree has no
@@ -167,6 +201,7 @@ local xml = file:read("*a")
 file:close()
 local ok, errorMessage = pcall(function()
 	loadBuildFromXML(xml, "optimizer")
+	restoreActiveBuildState()
 	settleCalculations()
 end)
 local output = build and build.calcsTab and build.calcsTab.mainOutput

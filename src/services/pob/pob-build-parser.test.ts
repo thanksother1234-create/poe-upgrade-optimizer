@@ -27,9 +27,17 @@ Heavy Belt
 Item Level: 85
 Implicits: 1
 +40 to Strength
+</Item><Item id="14">
+Item Class: Utility Flasks
+Rarity: MAGIC
+Chemist&apos;s Granite Flask of the Armadillo
+Granite Flask
+Item Level: 85
+Implicits: 0
+20% increased Armour during Effect
 </Item>
 <ItemSet id="1"><Slot itemId="0" name="Weapon 1"/></ItemSet>
-<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/></ItemSet></Items>
+<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/><Slot itemId="14" name="Flask 1"/></ItemSet></Items>
 </PathOfBuilding>`;
 
 const kalandrasTouchXml = xml
@@ -51,8 +59,8 @@ Reflects your other Ring
 </Item>
 <ItemSet id="1">`)
   .replace(
-    '<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/></ItemSet>',
-    '<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/><Slot itemId="12" name="Ring 1"/><Slot itemId="13" name="Ring 2"/></ItemSet>',
+    '<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/><Slot itemId="14" name="Flask 1"/></ItemSet>',
+    '<ItemSet id="2"><Slot itemId="10" name="Weapon 1"/><Slot itemId="11" name="Belt"/><Slot itemId="14" name="Flask 1"/><Slot itemId="12" name="Ring 1"/><Slot itemId="13" name="Ring 2"/></ItemSet>',
   );
 
 describe("PoB build parser", () => {
@@ -80,6 +88,10 @@ describe("PoB build parser", () => {
     expect(build.equipment.weapon.rawText).toContain("Glyph Chant");
     expect(build.equipment.weapon.modifiers.map((modifier) => modifier.label)).toContain("Adds 82 to 136 Chaos Damage");
     expect(build.equipment.belt).toMatchObject({ name: "Mageblood", baseType: "Heavy Belt", rarity: "unique" });
+    expect(build.flasks).toHaveLength(5);
+    expect(build.flasks?.[0]).toMatchObject({ name: "Chemist's Granite Flask of the Armadillo", baseType: "Granite Flask", rarity: "magic" });
+    expect(build.flasks?.[0].rawText).toContain("20% increased Armour during Effect");
+    expect(build.flasks?.[1].id).toBe("empty-flask2");
   });
 
   it("uses Full DPS when the saved build enables and calculates it", () => {

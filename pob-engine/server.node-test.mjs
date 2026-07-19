@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createConcurrencyLimiter, createEvaluationQueue, createPobEngineServer, parseEngineOutput, prepareBuildWithReplacements, replaceItemsInBuildXml, validateBaseline } from "./server.mjs";
 
@@ -72,6 +73,21 @@ test("reports material baseline and DPS-mode mismatches", () => {
   assert.match(mismatches.join(" "), /saved as FullDPS.*CombinedDPS/i);
   assert.match(mismatches.join(" "), /totalDps was 6700000.*58405/i);
   assert.match(mismatches.join(" "), /effectiveHitPool was 46579.*8011/i);
+});
+
+test("cached PoB snapshot mismatches are diagnostic and do not invalidate fresh worker results", async () => {
+  const source = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /baselineMismatches\.length\)\s*\{\s*throw/);
+  assert.match(source, /baselineDiagnostics:\s*baselineMismatches/);
+});
+
+test("worker safely rebinds loaded build sets before calculating", async () => {
+  const source = await readFile(new URL("./OptimizerWorker.lua", import.meta.url), "utf8");
+  assert.match(source, /specList\[activeSpec\][\s\S]*SetActiveSpec\(activeSpec\)/);
+  assert.match(source, /SetActiveItemSet\(activeItemSetId\)/);
+  assert.match(source, /SetActiveSkillSet\(activeSkillSetId\)/);
+  assert.match(source, /SetActiveConfigSet\(activeConfigSetId\)[\s\S]*BuildModList\(\)/);
+  assert.match(source, /loadBuildFromXML\(xml, "optimizer"\)[\s\S]*restoreActiveBuildState\(\)[\s\S]*settleCalculations\(\)/);
 });
 
 test("queues whole evaluations in FIFO order and reports changing positions", async () => {

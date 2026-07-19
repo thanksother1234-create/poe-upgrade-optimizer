@@ -133,6 +133,23 @@ function parseSkillGroups(xml: string, mainGroup: number): SkillGroup[] {
   }).filter((group) => group.gems.length > 0 && attributes(skillSet).enabled !== "false");
 }
 
+function parseFlasks(xml: string, items: Map<string, Item>): Item[] {
+  const itemSet = activeItemSetXml(xml);
+  return Array.from({ length: 5 }, (_, index) => {
+    const slotName = `Flask ${index + 1}`;
+    const slotMatch = [...itemSet.matchAll(/<Slot\s+([^>]+?)\s*\/>/g)]
+      .find((match) => attributes(match[1]).name === slotName);
+    const itemId = slotMatch ? attributes(slotMatch[1]).itemId : undefined;
+    return (itemId && itemId !== "0" ? items.get(itemId) : undefined) ?? {
+      id: `empty-flask${index + 1}`,
+      name: "Empty Flask",
+      baseType: "No item equipped",
+      rarity: "normal" as const,
+      modifiers: [],
+    };
+  });
+}
+
 function parseCharacterName(xml: string): string {
   const importAttrs = attributes(xml.match(/<Import\s+([^>]+?)\s*\/>/)?.[1] ?? "");
   if (!importAttrs.importLink) return "Imported Build";
@@ -163,7 +180,9 @@ export function parsePobXml(xml: string): Build {
     chaosResistance: stats.ChaosResist || stats.ChaosResistance || 0,
   };
   const name = parseCharacterName(xml);
-  const equipment = parseEquipment(xml, parseItems(xml));
+  const items = parseItems(xml);
+  const equipment = parseEquipment(xml, items);
+  const flasks = parseFlasks(xml, items);
   const kalandrasTouch = applyKalandrasTouchCopy(equipment);
   const mainSocketGroup = number(buildAttrs.mainSocketGroup) || 1;
   const skillGroups = parseSkillGroups(xml, mainSocketGroup);
@@ -176,7 +195,7 @@ export function parsePobXml(xml: string): Build {
       name, className: buildAttrs.className ?? "Unknown class", ascendancy: buildAttrs.ascendClassName ?? "",
       level: number(buildAttrs.level), mainSkill, league: "Imported PoB",
     },
-    equipment, metrics, sourceXml: xml, dpsMetric, skillGroups,
+    equipment, flasks, metrics, sourceXml: xml, dpsMetric, skillGroups,
     ...(kalandrasTouch ? { kalandrasTouch } : {}),
   };
 }

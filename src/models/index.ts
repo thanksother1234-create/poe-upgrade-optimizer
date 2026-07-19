@@ -33,6 +33,7 @@ export interface Build {
   id: string;
   character: Character;
   equipment: Equipment;
+  flasks?: Item[];
   metrics: BuildMetrics;
   sourceXml?: string;
   dpsMetric?: DpsMetric;
