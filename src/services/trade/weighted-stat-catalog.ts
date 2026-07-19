@@ -1,5 +1,6 @@
 import { Build, EquipmentSlot, Item, OptimizationGoal } from "@/models";
 import { getTradeCategory } from "@/services/trade/trade-categories";
+import tradeAffixes from "@/data/trade-affixes.json";
 
 export type WeightPreset = "auto" | "strength-stacker" | "dexterity-stacker" | "intelligence-stacker" | "physical-attack" | "elemental-attack" | "critical-spell" | "damage-over-time" | "minion" | "mana-stacker";
 export type ResolvedWeightPreset = Exclude<WeightPreset, "auto">;
@@ -32,6 +33,8 @@ export interface WeightedStatDefinition {
   presets?: ResolvedWeightPreset[];
   categories: string[];
 }
+
+export interface TradeAffixDefinition { id: string; label: string; categories: string[] }
 
 const ATTACK_PRESETS: ResolvedWeightPreset[] = ["strength-stacker", "dexterity-stacker", "intelligence-stacker", "physical-attack", "elemental-attack"];
 const SPELL_PRESETS: ResolvedWeightPreset[] = ["critical-spell", "mana-stacker"];
@@ -110,6 +113,12 @@ export function getEligibleWeightedStats(build: Build, slot: EquipmentSlot, pres
 export function getManualWeightedStats(build: Build, slot: EquipmentSlot) {
   const category = getTradeCategory(slot, build.equipment[slot]);
   return WEIGHTED_STAT_LIBRARY.filter((definition) => matchesCategory(definition, category));
+}
+
+export function getManualTradeAffixes(build: Build, slot: EquipmentSlot): TradeAffixDefinition[] {
+  const category = getTradeCategory(slot, build.equipment[slot]);
+  if (!category) return [];
+  return (tradeAffixes as TradeAffixDefinition[]).filter((definition) => definition.categories.includes(category));
 }
 
 export function defaultWeightForStat(definition: WeightedStatDefinition, build: Build, goal: OptimizationGoal) {

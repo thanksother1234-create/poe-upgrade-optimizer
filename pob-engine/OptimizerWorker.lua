@@ -91,21 +91,9 @@ local function metricSignature(output)
 end
 
 local function settleCalculations()
-	-- Loading restores these selectors from XML. Re-applying them makes every tab
-	-- publish its active state before the forced calculation rebuild.
-	if build.treeTab and build.treeTab.activeSpec then
-		build.treeTab:SetActiveSpec(build.treeTab.activeSpec)
-	end
-	if build.itemsTab and build.itemsTab.activeItemSetId then
-		build.itemsTab:SetActiveItemSet(build.itemsTab.activeItemSetId)
-	end
-	if build.skillsTab and build.skillsTab.activeSkillSetId then
-		build.skillsTab:SetActiveSkillSet(build.skillsTab.activeSkillSetId)
-	end
-	if build.configTab and build.configTab.activeConfigSetId then
-		build.configTab:SetActiveConfigSet(build.configTab.activeConfigSetId)
-	end
-
+	-- loadBuildFromXML restores the active tree, item, skill, and config sets.
+	-- Re-running their setters is unsafe for builds whose legacy tree has no
+	-- current spec object, so only force the calculation layer to rebuild.
 	build.buildFlag = true
 	local previous
 	local stableFrames = 0
