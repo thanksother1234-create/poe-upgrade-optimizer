@@ -118,7 +118,7 @@ function parseSkillGroups(xml: string, mainGroup: number): SkillGroup[] {
         name,
         level: number(gem.level),
         quality: number(gem.quality),
-        isSupport: /^Support/i.test(gem.skillId ?? "") || / Support$/i.test(name),
+        isSupport: /Support/i.test(gem.skillId ?? "") || / Support$/i.test(name),
         enabled: gem.enabled !== "false",
       };
     }).filter((gem) => gem.enabled);
