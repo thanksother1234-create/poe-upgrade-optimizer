@@ -219,12 +219,23 @@ function WeightedSearchEditor({
   onCopy: () => void;
   onDone: () => void;
 }) {
-  const [statToAdd, setStatToAdd] = useState("");
+  const [statSearch, setStatSearch] = useState("");
+  const [statSearchOpen, setStatSearchOpen] = useState(false);
+  const [highlightedStat, setHighlightedStat] = useState(0);
   const [addedWeight, setAddedWeight] = useState(1);
   const tradeUrl = createEncodedTradeSearchUrl(league, draft.request);
   const minimumScore = draft.request.query.stats[0].value.min;
   const activeOptions = draft.options.filter((option) => option.weight !== 0).length;
-  const selectedOption = availableOptions.find((option) => option.id === statToAdd);
+  const normalizedStatSearch = statSearch.trim().toLocaleLowerCase();
+  const filteredStatOptions = availableOptions
+    .filter((option) => !normalizedStatSearch || `${option.label} ${option.reason}`.toLocaleLowerCase().includes(normalizedStatSearch))
+    .slice(0, 8);
+  const selectedOption = availableOptions.find((option) => option.label.toLocaleLowerCase() === normalizedStatSearch);
+  const chooseStat = (option: WeightedTradeOption) => {
+    setStatSearch(option.label);
+    setStatSearchOpen(false);
+    setHighlightedStat(0);
+  };
 
   return <Card className="gap-0 overflow-hidden border-primary/25 bg-background/55 py-0 shadow-inner sm:col-span-2">
     <CardHeader className="flex flex-row items-start justify-between gap-4 border-b border-border/70 px-5 py-4">
@@ -239,9 +250,42 @@ function WeightedSearchEditor({
       <div className="space-y-3 rounded-xl border border-dashed border-primary/30 bg-primary/[0.04] p-4">
         <div><p className="text-sm font-medium">Add another trade stat</p><p className="mt-1 text-xs text-muted-foreground">Only stats compatible with this item class are available.</p></div>
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_auto]">
-          <Select value={statToAdd} onValueChange={setStatToAdd}><SelectTrigger className="h-10 w-full bg-background/70"><SelectValue placeholder="Choose a stat" /></SelectTrigger><SelectContent>{availableOptions.map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select>
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={statSearchOpen}
+              aria-controls={`stat-options-${slot}`}
+              value={statSearch}
+              placeholder="Search trade stats..."
+              autoComplete="off"
+              className="h-10 bg-background/70 pl-9"
+              onFocus={() => setStatSearchOpen(true)}
+              onBlur={() => window.setTimeout(() => setStatSearchOpen(false), 100)}
+              onChange={(event) => { setStatSearch(event.target.value); setStatSearchOpen(true); setHighlightedStat(0); }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") { event.preventDefault(); setStatSearchOpen(true); setHighlightedStat((current) => Math.min(current + 1, filteredStatOptions.length - 1)); }
+                if (event.key === "ArrowUp") { event.preventDefault(); setHighlightedStat((current) => Math.max(current - 1, 0)); }
+                if (event.key === "Escape") setStatSearchOpen(false);
+                if (event.key === "Enter" && statSearchOpen && filteredStatOptions[highlightedStat]) { event.preventDefault(); chooseStat(filteredStatOptions[highlightedStat]); }
+              }}
+            />
+            {statSearchOpen && <div id={`stat-options-${slot}`} role="listbox" className="absolute z-50 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl">
+              {filteredStatOptions.length ? filteredStatOptions.map((option, index) => <button
+                key={option.id}
+                type="button"
+                role="option"
+                aria-selected={selectedOption?.id === option.id}
+                className={cn("block w-full rounded-md px-3 py-2 text-left", index === highlightedStat ? "bg-accent text-accent-foreground" : "hover:bg-accent/60")}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setHighlightedStat(index)}
+                onClick={() => chooseStat(option)}
+              ><span className="block text-xs font-medium">{option.label}</span><span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{option.reason}</span></button>) : <p className="px-3 py-4 text-center text-xs text-muted-foreground">No compatible stats match “{statSearch}”.</p>}
+            </div>}
+          </div>
           <Input type="number" step="0.01" value={addedWeight} onChange={(event) => setAddedWeight(Number(event.target.value) || 0)} aria-label="New stat weight" className="h-10 bg-background/70 text-right font-mono" />
-          <Button variant="outline" disabled={!selectedOption} onClick={() => { if (!selectedOption) return; onAdd(selectedOption, addedWeight); setStatToAdd(""); }}><Plus />Add stat</Button>
+          <Button variant="outline" disabled={!selectedOption} onClick={() => { if (!selectedOption) return; onAdd(selectedOption, addedWeight); setStatSearch(""); }}><Plus />Add stat</Button>
         </div>
       </div>
       <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card/35">
