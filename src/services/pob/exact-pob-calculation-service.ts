@@ -48,6 +48,11 @@ function publicTradeItem(item: TradeItem): TradeItem {
   return copy;
 }
 
+function replacementSlots(build: Build, slot: EquipmentSlot): EquipmentSlot[] {
+  if (build.kalandrasTouch && (slot === "ring1" || slot === "ring2")) return ["ring1", "ring2"];
+  return [slot];
+}
+
 export class ExactPobCalculationService implements PobCalculationService {
   private readonly importer = new MvpPobCalculationService();
 
@@ -74,7 +79,10 @@ export class ExactPobCalculationService implements PobCalculationService {
   async simulateItemReplacements(build: Build, items: TradeItem[]): Promise<PobBatchSimulationResult> {
     const scenarios = items.map((item, index) => {
       if (!item.rawText) throw new PobEngineError(`The candidate ${item.name} did not include copied Path of Building item text.`);
-      return { id: `${index}:${item.slot}:${item.id}`, replacements: [{ slot: item.slot, rawText: item.rawText }] };
+      return {
+        id: `${index}:${item.slot}:${item.id}`,
+        replacements: replacementSlots(build, item.slot).map((slot) => ({ slot, rawText: item.rawText! })),
+      };
     });
     const response = await this.evaluate(build, scenarios);
     const byId = new Map(response.results.map((result) => [result.id, result]));

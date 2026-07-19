@@ -1,4 +1,4 @@
-import { Build, BuildMetrics, Equipment, EquipmentSlot, Item, ItemModifier, ItemRarity } from "@/models";
+import { Build, BuildMetrics, Equipment, EquipmentSlot, Item, ItemModifier, ItemRarity, KalandrasTouchSetup, RingSlot } from "@/models";
 
 const SLOT_MAP: Record<string, EquipmentSlot> = {
   "Weapon 1": "weapon", "Weapon 2": "offhand", Helmet: "helmet", "Body Armour": "bodyArmour",
@@ -85,6 +85,25 @@ function parseEquipment(xml: string, items: Map<string, Item>): Equipment {
   return equipment;
 }
 
+const isKalandrasTouch = (item: Item) => item.name.toLowerCase().replace(/[’']/g, "") === "kalandras touch";
+
+function applyKalandrasTouchCopy(equipment: Equipment): KalandrasTouchSetup | undefined {
+  const ringSlots: RingSlot[] = ["ring1", "ring2"];
+  const touchSlot = ringSlots.find((slot) => isKalandrasTouch(equipment[slot]));
+  if (!touchSlot) return undefined;
+
+  const sourceSlot: RingSlot = touchSlot === "ring1" ? "ring2" : "ring1";
+  const sourceRing = equipment[sourceSlot];
+  if (sourceRing.id.startsWith("empty-") || isKalandrasTouch(sourceRing)) return undefined;
+
+  equipment[touchSlot] = {
+    ...sourceRing,
+    id: `${sourceRing.id}-kalandras-copy-${touchSlot}`,
+    modifiers: sourceRing.modifiers.map((modifier) => ({ ...modifier })),
+  };
+  return { touchSlot, sourceSlot };
+}
+
 function parseMainSkill(xml: string, group: number): string {
   const skillsTag = xml.match(/<Skills\s+([^>]*)>/)?.[1] ?? "";
   const activeSet = attributes(skillsTag).activeSkillSet ?? "1";
@@ -127,13 +146,16 @@ export function parsePobXml(xml: string): Build {
     chaosResistance: stats.ChaosResist || stats.ChaosResistance || 0,
   };
   const name = parseCharacterName(xml);
+  const equipment = parseEquipment(xml, parseItems(xml));
+  const kalandrasTouch = applyKalandrasTouchCopy(equipment);
   return {
     id: `pob-${name}-${xml.length}`,
     character: {
       name, className: buildAttrs.className ?? "Unknown class", ascendancy: buildAttrs.ascendClassName ?? "",
       level: number(buildAttrs.level), mainSkill: parseMainSkill(xml, number(buildAttrs.mainSocketGroup) || 1), league: "Imported PoB",
     },
-    equipment: parseEquipment(xml, parseItems(xml)), metrics, sourceXml: xml, dpsMetric,
+    equipment, metrics, sourceXml: xml, dpsMetric,
+    ...(kalandrasTouch ? { kalandrasTouch } : {}),
   };
 }
 
