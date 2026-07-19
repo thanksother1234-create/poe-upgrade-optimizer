@@ -42,10 +42,21 @@ describe("PoB build parser", () => {
     const build = parsePobXml(xml);
     expect(build.character).toMatchObject({ name: "ActualCharacter", className: "Marauder", ascendancy: "Juggernaut", level: 98, mainSkill: "Kinetic Blast" });
     expect(build.metrics).toMatchObject({ totalDps: 6701956, effectiveHitPool: 46578, elementalMaxHit: 33540 });
+    expect(build.dpsMetric).toBe("CombinedDPS");
     expect(build.equipment.weapon).toMatchObject({ name: "Glyph Chant", baseType: "Kinetic Wand", rarity: "rare" });
     expect(build.equipment.weapon.itemClass).toBe("Wands");
     expect(build.equipment.weapon.rawText).toContain("Glyph Chant");
     expect(build.equipment.weapon.modifiers.map((modifier) => modifier.label)).toContain("Adds 82 to 136 Chaos Damage");
     expect(build.equipment.belt).toMatchObject({ name: "Mageblood", baseType: "Heavy Belt", rarity: "unique" });
+  });
+
+  it("uses Full DPS when the saved build enables and calculates it", () => {
+    const fullDpsXml = xml.replace(
+      '<PlayerStat value="6701956" stat="CombinedDPS"/>',
+      '<PlayerStat value="6701956" stat="CombinedDPS"/><PlayerStat value="9100000" stat="FullDPS"/>',
+    );
+    const build = parsePobXml(fullDpsXml);
+    expect(build.metrics.totalDps).toBe(9_100_000);
+    expect(build.dpsMetric).toBe("FullDPS");
   });
 });

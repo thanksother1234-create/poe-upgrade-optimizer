@@ -1,4 +1,4 @@
-import { Build, BuildMetrics, CalculationVerification, EquipmentSlot, SimulationResult, TradeItem } from "@/models";
+import { Build, BuildMetrics, CalculationVerification, DpsMetric, EquipmentSlot, SimulationResult, TradeItem } from "@/models";
 import { decodePobCode, parsePobXml } from "@/services/pob/pob-build-parser";
 import { applyMetricChanges, estimateItemReplacement } from "@/services/pob/item-effect-estimator";
 
@@ -13,6 +13,7 @@ export interface PobBatchSimulationResult {
   simulations: SimulationResult[];
   verification: CalculationVerification;
   engineVersion?: string;
+  dpsMetric?: DpsMetric;
 }
 async function resolvePobInput(input: string): Promise<string> {
   const trimmed = input.trim();

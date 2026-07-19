@@ -13,7 +13,7 @@ describe("ExactPobCalculationService", () => {
       const request = JSON.parse(String(init?.body)) as { scenarios: { id: string; replacements: { rawText: string }[] }[] };
       expect(init?.headers).toMatchObject({ Authorization: "Bearer secret" });
       expect(request.scenarios[0].replacements[0].rawText).toContain("Verified Ring");
-      return Response.json({ engineVersion: "v2.65.0", baseline, results: [{ id: request.scenarios[0].id, metrics: improved }] });
+      return Response.json({ engineVersion: "v2.65.0", dpsMetric: "FullDPS", baseline, results: [{ id: request.scenarios[0].id, metrics: improved }] });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -27,7 +27,28 @@ describe("ExactPobCalculationService", () => {
 
     expect(result.verification).toBe("pob");
     expect(result.engineVersion).toBe("v2.65.0");
+    expect(result.dpsMetric).toBe("FullDPS");
     expect(result.simulations[0].changes).toMatchObject({ totalDps: 100_000, effectiveHitPool: 2_000 });
     expect(result.simulations[0].item.rawText).toBeUndefined();
+  });
+
+  it("names the candidate when PoB rejects or fails to equip it", async () => {
+    const baseline = structuredClone(mockBuild.metrics);
+    vi.stubGlobal("fetch", vi.fn(async (_url: URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { scenarios: { id: string }[] };
+      return Response.json({
+        engineVersion: "v2.65.0",
+        dpsMetric: "CombinedDPS",
+        baseline,
+        results: [{ id: request.scenarios[0].id, error: "Path of Building assigned item 33 to Ring 1 but rejected the candidate item text." }],
+      });
+    }));
+    const item: TradeItem = {
+      id: "bad-listing", slot: "ring1", name: "Unreadable Ring", baseType: "Opal Ring", rarity: "rare",
+      modifiers: [], price: { amount: 1, currency: "divine" }, rawText: "Rarity: RARE\nUnreadable Ring\nOpal Ring",
+    };
+    const build = { ...structuredClone(mockBuild), sourceXml: "<PathOfBuilding></PathOfBuilding>" };
+    await expect(new ExactPobCalculationService("https://engine.example", "secret").simulateItemReplacements(build, [item]))
+      .rejects.toThrow(/could not evaluate Unreadable Ring.*rejected the candidate item text/i);
   });
 });

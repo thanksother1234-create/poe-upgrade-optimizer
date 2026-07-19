@@ -110,9 +110,10 @@ export function parsePobXml(xml: string): Build {
   if (!xml.includes("<PathOfBuilding")) throw new Error("This does not appear to be a valid Path of Building export.");
   const buildAttrs = attributes(xml.match(/<Build\s+([^>]*)>/)?.[1] ?? "");
   const stats = extractStats(xml);
+  const dpsMetric = stats.FullDPS > 0 ? "FullDPS" : stats.CombinedDPS > 0 ? "CombinedDPS" : "TotalDPS";
   const elementalHits = [stats.FireMaximumHitTaken, stats.ColdMaximumHitTaken, stats.LightningMaximumHitTaken].filter((value) => value > 0);
   const metrics: BuildMetrics = {
-    totalDps: stats.CombinedDPS || stats.TotalDPS || 0,
+    totalDps: stats.FullDPS || stats.CombinedDPS || stats.TotalDPS || 0,
     effectiveHitPool: stats.TotalEHP || 0,
     physicalMaxHit: stats.PhysicalMaximumHitTaken || 0,
     elementalMaxHit: elementalHits.length ? Math.min(...elementalHits) : 0,
@@ -132,7 +133,7 @@ export function parsePobXml(xml: string): Build {
       name, className: buildAttrs.className ?? "Unknown class", ascendancy: buildAttrs.ascendClassName ?? "",
       level: number(buildAttrs.level), mainSkill: parseMainSkill(xml, number(buildAttrs.mainSocketGroup) || 1), league: "Imported PoB",
     },
-    equipment: parseEquipment(xml, parseItems(xml)), metrics, sourceXml: xml,
+    equipment: parseEquipment(xml, parseItems(xml)), metrics, sourceXml: xml, dpsMetric,
   };
 }
 
