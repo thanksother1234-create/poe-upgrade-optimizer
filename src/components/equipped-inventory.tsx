@@ -72,6 +72,24 @@ function ItemArtwork({ item, slot }: { item: Item; slot?: EquipmentSlot }) {
   const source = candidates[candidateIndex];
   if (!source) return <Icon aria-hidden="true" className="size-8 text-sky-200/30" />;
 
+  if (!slot) {
+    return (
+      <span className="relative aspect-[1/2] h-[76%] max-h-[76%] max-w-[76%] overflow-hidden drop-shadow-[0_8px_9px_rgba(0,0,0,0.9)] transition-transform duration-200 group-hover:scale-[1.04]">
+        <Image
+          key={source}
+          src={source}
+          alt={`${item.baseType} inventory artwork`}
+          width={143}
+          height={95}
+          unoptimized
+          draggable={false}
+          className="absolute inset-y-0 left-0 h-full w-[300%] max-w-none object-fill object-left"
+          onError={() => setCandidateIndex((current) => current + 1)}
+        />
+      </span>
+    );
+  }
+
   return <Image
     key={source}
     src={source}
