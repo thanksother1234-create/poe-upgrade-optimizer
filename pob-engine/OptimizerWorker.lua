@@ -119,6 +119,18 @@ local function restoreActiveBuildState()
 		skillsTab:SetActiveSkillSet(activeSkillSetId)
 	end
 
+	-- PoB can export cached headline DPS for the selected main socket group
+	-- even when that group was subsequently unchecked in the Skills tab. A
+	-- clean recalculation then silently falls back to another enabled group
+	-- (for example Frostblink instead of Kinetic Blast). The optimizer is
+	-- explicitly comparing the exported main skill, so ensure that selected
+	-- group participates in both the baseline and every candidate calculation.
+	local mainSocketGroup = build.mainSocketGroup
+	local selectedMainGroup = skillsTab and skillsTab.socketGroupList and skillsTab.socketGroupList[mainSocketGroup]
+	if selectedMainGroup then
+		selectedMainGroup.enabled = true
+	end
+
 	local configTab = build and build.configTab
 	local activeConfigSetId = configTab and configTab.activeConfigSetId
 	if activeConfigSetId and configTab.configSets and configTab.configSets[activeConfigSetId] then
