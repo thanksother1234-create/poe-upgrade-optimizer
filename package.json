@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:engine": "node --test pob-engine/server.node-test.mjs",
     "sync:item-art": "node scripts/sync-item-art.mjs",
+    "sync:trade-affixes": "node scripts/sync-trade-affixes.mjs",
     "deploy:engine:hf": "node scripts/deploy-huggingface-engine.mjs"
   },
   "dependencies": {

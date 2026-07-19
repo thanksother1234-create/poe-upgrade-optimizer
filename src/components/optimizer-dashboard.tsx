@@ -14,7 +14,7 @@ import { formatNumber, formatPrice, percentChange } from "@/lib/metrics";
 import { isManualCandidateCompatible, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
 import { createEncodedTradeSearchUrl } from "@/services/trade/trade-search-service";
 import { applyPobCalculatedWeights, createWeightedTradeSearch, customizeWeightedTradeSearch, type WeightedTradeOption, type WeightedTradeSearchCustomization, type WeightedTradeSearchDraft } from "@/services/trade/weighted-search-service";
-import { currentItemStatValue, getManualWeightedStats, WEIGHT_PRESETS, type WeightPreset } from "@/services/trade/weighted-stat-catalog";
+import { currentItemStatValue, getManualTradeAffixes, getManualWeightedStats, WEIGHT_PRESETS, type WeightPreset } from "@/services/trade/weighted-stat-catalog";
 import { type PobCalculatedWeightResult } from "@/services/pob/pob-weight-calculation-service";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -543,7 +543,7 @@ export default function OptimizerDashboard() {
   const manualOptionsForSlot = (slot: EquipmentSlot) => {
     if (!build) return [];
     const existing = new Set(weightedSearches[slot]?.options.map((option) => option.id) ?? []);
-    return getManualWeightedStats(build, slot).filter((definition) => !existing.has(definition.id)).map((definition) => ({
+    const measured = getManualWeightedStats(build, slot).filter((definition) => !existing.has(definition.id)).map((definition) => ({
       id: definition.id,
       label: definition.label,
       weight: 1,
@@ -551,6 +551,16 @@ export default function OptimizerDashboard() {
       source: "manual" as const,
       currentValue: currentItemStatValue(build.equipment[slot], definition),
     }));
+    const included = new Set([...existing, ...measured.map((option) => option.id)]);
+    const affixes = getManualTradeAffixes(build, slot).filter((definition) => !included.has(definition.id)).map((definition) => ({
+      id: definition.id,
+      label: definition.label,
+      weight: 1,
+      reason: `Official trade affix available for ${build.equipment[slot].itemClass ?? slot}.`,
+      source: "manual" as const,
+      currentValue: 0,
+    }));
+    return [...measured, ...affixes];
   };
   const prepareManualSearch = () => document.getElementById("manual-candidates")?.scrollIntoView({ behavior: "smooth" });
 
