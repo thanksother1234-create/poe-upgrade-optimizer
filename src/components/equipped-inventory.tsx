@@ -76,23 +76,44 @@ function ItemArtwork({ item, slot }: { item: Item; slot: EquipmentSlot }) {
   />;
 }
 
-function tooltipLines(item: Item) {
-  if (!item.rawText) return item.modifiers.map((modifier) => modifier.label);
+function tooltipGroups(item: Item) {
+  if (!item.rawText) return [item.modifiers.map((modifier) => modifier.label.replace(/\{crafted\}/gi, "").trim())];
 
+  const groups: string[][] = [[]];
   let skippedName = false;
   let skippedBase = false;
-  return item.rawText.split(/\r?\n/).map((line) => line.trim()).filter((line) => {
-    if (!line || line === "--------" || /^Item Class:/i.test(line) || /^Rarity:/i.test(line)) return false;
-    if (!skippedName && line === item.name) { skippedName = true; return false; }
-    if (!skippedBase && line === item.baseType) { skippedBase = true; return false; }
-    return true;
-  });
+  let skipUniqueIdValue = false;
+
+  for (const rawLine of item.rawText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line === "--------") {
+      if (groups.at(-1)?.length) groups.push([]);
+      continue;
+    }
+    if (skipUniqueIdValue) {
+      skipUniqueIdValue = false;
+      continue;
+    }
+    if (/^Unique ID:/i.test(line)) {
+      skipUniqueIdValue = !line.slice(line.indexOf(":") + 1).trim();
+      continue;
+    }
+    if (/^(?:Item Class|Rarity|ArmourBasePercentile):/i.test(line)) continue;
+    if (!skippedName && line === item.name) { skippedName = true; continue; }
+    if (!skippedBase && line === item.baseType) { skippedBase = true; continue; }
+
+    const cleanLine = line.replace(/\{crafted\}/gi, "").trim();
+    if (cleanLine) groups.at(-1)?.push(cleanLine);
+  }
+
+  return groups.filter((group) => group.length > 0);
 }
 
 function EquippedItem({ item, slot, reflected }: { item: Item; slot: EquipmentSlot; reflected: boolean }) {
   const empty = item.id.startsWith("empty-");
   const rarity = rarityStyles[item.rarity];
-  const lines = tooltipLines(item);
+  const groups = tooltipGroups(item);
 
   return <Tooltip>
     <TooltipTrigger asChild>
@@ -114,16 +135,16 @@ function EquippedItem({ item, slot, reflected }: { item: Item; slot: EquipmentSl
         {reflected && <span className="absolute top-1 right-1 z-20 rounded-full border border-sky-300/30 bg-sky-950/90 px-1.5 py-0.5 text-[7px] font-bold tracking-wide text-sky-200 uppercase">Mirrored</span>}
       </button>
     </TooltipTrigger>
-    <TooltipContent side="right" sideOffset={12} collisionPadding={16} className={cn("block w-[22rem] max-w-[calc(100vw-2rem)] items-stretch gap-0 overflow-hidden border bg-[#070d15] p-0 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.8)]", rarity.border)}>
-      <div className={cn("border-b px-4 py-3 text-center", rarity.border, item.rarity === "rare" ? "bg-amber-300/[0.04]" : item.rarity === "unique" ? "bg-orange-500/[0.05]" : "bg-sky-400/[0.04]")}> 
-        <p className={cn("font-heading text-base font-semibold", rarity.name)}>{empty ? slotLabels[slot] : item.name}</p>
-        <p className="mt-0.5 text-[11px] text-slate-400">{item.baseType}</p>
+    <TooltipContent side="right" sideOffset={12} collisionPadding={16} className={cn("block w-[24rem] max-w-[calc(100vw-2rem)] items-stretch gap-0 overflow-hidden rounded-xl border bg-[#070d15]/98 p-0 text-foreground shadow-[0_24px_80px_rgba(0,0,0,0.85)] backdrop-blur-xl", rarity.border)}>
+      <div className={cn("border-b px-5 py-4 text-center", rarity.border, item.rarity === "rare" ? "bg-gradient-to-b from-amber-300/[0.09] to-transparent" : item.rarity === "unique" ? "bg-gradient-to-b from-orange-500/[0.1] to-transparent" : "bg-gradient-to-b from-sky-400/[0.08] to-transparent")}>
+        <p className={cn("font-heading text-lg font-semibold tracking-wide", rarity.name)}>{empty ? slotLabels[slot] : item.name}</p>
+        <p className="mt-1 text-xs text-slate-400">{item.baseType}</p>
         {!empty && <div className="mt-2 flex flex-wrap justify-center gap-1.5"><Badge variant="outline" className="h-5 text-[9px] capitalize">{item.rarity}</Badge>{item.itemClass && <Badge variant="outline" className="h-5 text-[9px]">{item.itemClass}</Badge>}{reflected && <Badge className="h-5 bg-sky-400/15 text-[9px] text-sky-200">Kalandra copy</Badge>}</div>}
       </div>
-      <div className="max-h-[min(32rem,70vh)] overflow-y-auto px-4 py-3 text-center text-[11px] leading-4">
-        {lines.length > 0 ? <div className="space-y-1.5">{lines.map((line, index) => <p key={`${line}-${index}`} className={cn(/^\w[^%+\d]*:$/.test(line) || /^(?:Requirements|Implicits):?/i.test(line) ? "text-slate-400" : "text-sky-200")}>{line}</p>)}</div> : <p className="text-slate-400">{empty ? "Nothing is equipped in this slot." : "No stat lines were included in the import."}</p>}
+      <div className="max-h-[min(34rem,70vh)] overflow-y-auto overscroll-contain px-3 py-3 text-center text-[11px] leading-[1.45] [scrollbar-color:rgba(125,211,252,0.25)_transparent]">
+        {groups.length > 0 ? <div className="space-y-2">{groups.map((group, groupIndex) => <div key={`${group[0]}-${groupIndex}`} className="rounded-lg border border-slate-700/45 bg-slate-900/35 px-3 py-2.5 shadow-inner shadow-black/20">{group.map((line, lineIndex) => <p key={`${line}-${lineIndex}`} className={cn("break-words py-0.5", /^\w[^%+\d]*:$/.test(line) || /^(?:Requirements|Implicits):?/i.test(line) ? "font-medium tracking-wide text-slate-400" : "text-sky-100")}>{line}</p>)}</div>)}</div> : <p className="py-4 text-slate-400">{empty ? "Nothing is equipped in this slot." : "No stat lines were included in the import."}</p>}
       </div>
-      <div className="border-t border-slate-700/60 bg-slate-950/70 px-4 py-2 text-center text-[9px] text-slate-500">Hover or focus any equipped item to inspect it</div>
+      <div className="border-t border-slate-700/60 bg-slate-950/70 px-4 py-2 text-center text-[9px] tracking-wide text-slate-500">Imported item details</div>
     </TooltipContent>
   </Tooltip>;
 }
