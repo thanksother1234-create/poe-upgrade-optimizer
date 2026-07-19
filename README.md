@@ -48,6 +48,16 @@ Future worker updates can be uploaded from this repository with:
 npm.cmd run deploy:engine:hf -- YOUR_HF_USERNAME/YOUR_SPACE_NAME
 ```
 
+## Work with Codex from GitHub
+
+The `Codex issue assistant` workflow lets the repository owner request work from a phone or any browser:
+
+1. Create an issue using the **Codex task** template.
+2. Add a comment beginning with `/codex`, such as `/codex implement this issue` or `/codex investigate this and explain the likely cause`.
+3. Wait for the workflow to reply. If Codex changes files, it opens a separate pull request; it never pushes directly to `main`.
+
+The workflow requires a GitHub Actions repository secret named `OPENAI_API_KEY`. This is an OpenAI Platform API key and is billed separately from a ChatGPT subscription. In **Settings → Actions → General → Workflow permissions**, also enable **Allow GitHub Actions to create and approve pull requests** so the publishing job can open its review PR. Only comments from the repository owner can start the workflow. Codex receives read access plus an isolated writable checkout, while the separate publishing job receives GitHub write access without receiving the OpenAI key.
+
 ## Verification
 
 ```powershell
