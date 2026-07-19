@@ -32,6 +32,10 @@ const METRIC_NAMES = [
   "life", "energyShield", "armour", "evasion", "spellSuppression", "fireResistance",
   "coldResistance", "lightningResistance", "chaosResistance",
 ];
+const BASELINE_VALIDATION_METRICS = [
+  "totalDps", "effectiveHitPool", "physicalMaxHit", "elementalMaxHit", "chaosMaxHit",
+  "life", "energyShield", "armour", "evasion",
+];
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const escapeXmlText = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -256,6 +260,24 @@ export function parseEngineOutput(stdout, scenarioIds, stderr = "") {
   return { baseline, dpsMetric: dpsMetricByIndex.get(0) ?? "CombinedDPS", results };
 }
 
+export function validateBaseline(expected, actual, expectedDpsMetric, actualDpsMetric, tolerance = 0.02) {
+  if (!expected || typeof expected !== "object") return [];
+  const mismatches = [];
+  if (expectedDpsMetric && actualDpsMetric && expectedDpsMetric !== actualDpsMetric) {
+    mismatches.push(`DPS mode was saved as ${expectedDpsMetric} but recalculated as ${actualDpsMetric}`);
+  }
+  for (const name of BASELINE_VALIDATION_METRICS) {
+    const saved = Number(expected[name]);
+    const recalculated = Number(actual?.[name]);
+    if (!Number.isFinite(saved) || !Number.isFinite(recalculated) || saved === 0) continue;
+    const relativeDifference = Math.abs(recalculated - saved) / Math.max(Math.abs(saved), 1);
+    if (relativeDifference > tolerance) {
+      mismatches.push(`${name} was ${saved} in the saved PoB snapshot but recalculated as ${recalculated}`);
+    }
+  }
+  return mismatches;
+}
+
 const assignmentArgument = ({ slotName, itemId, itemName }) => [slotName, itemId, itemName]
   .map((value) => String(value).replace(/[\t\r\n]/g, " "))
   .join("\t");
@@ -289,7 +311,7 @@ async function evaluateBuildFile({ file, expectedAssignments, worker, pobSource,
   });
 }
 
-export async function evaluateScenarios({ buildXml, scenarios }) {
+export async function evaluateScenarios({ buildXml, scenarios, expectedBaseline, expectedDpsMetric }) {
   if (typeof buildXml !== "string" || buildXml.length > 3 * 1024 * 1024) throw Object.assign(new Error("A valid Path of Building XML export is required."), { status: 400 });
   if (!Array.isArray(scenarios) || scenarios.length > MAX_SCENARIOS) throw Object.assign(new Error(`No more than ${MAX_SCENARIOS} scenarios can be evaluated at once.`), { status: 400 });
   for (const scenario of scenarios) {
@@ -319,6 +341,10 @@ export async function evaluateScenarios({ buildXml, scenarios }) {
     })));
     const baseline = outcomes[0];
     if (!baseline || baseline.error || !baseline.metrics) throw new Error(`Baseline build failed: ${baseline?.error ?? "Path of Building returned no metrics."}`);
+    const baselineMismatches = validateBaseline(expectedBaseline, baseline.metrics, expectedDpsMetric, baseline.dpsMetric);
+    if (baselineMismatches.length) {
+      throw Object.assign(new Error(`The hosted Path of Building calculation did not match the imported build: ${baselineMismatches.slice(0, 4).join("; ")}. Recalculate and save the build in Path of Building, then import it again.`), { status: 409 });
+    }
     const results = scenarios.map((scenario, index) => {
       const outcome = outcomes[index + 1];
       if (!outcome || outcome.error || !outcome.metrics) return { id: scenario.id, error: outcome?.error ?? "Path of Building returned no metrics for this candidate." };

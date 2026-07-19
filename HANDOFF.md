@@ -15,6 +15,8 @@ Last updated: 2026-07-19
 - The equipment view is left-aligned in a two-column layout with a new `Skills & supports` panel. The PoB parser imports active socket groups, linked gems, support status, levels, quality, slot labels, and the main skill directly from the active skill set.
 - Equipment slots are repacked into a dense 7-by-6 grid with smaller artwork bounds, eliminating the large empty perimeter and silhouette gaps that made items appear squashed after adding the gem panel.
 - Active and support gems use direct PoE CDN artwork when available, with the generic gem glyph as an image-failure fallback. The local index currently covers 601 gems, and `npm.cmd run sync:item-art` refreshes both equipment and skill-gem art indexes.
+- The hosted PoB worker now re-applies every active build selector, forces a clean calculation, and waits for three stable metric frames (up to 30) before reading results. It validates DPS mode and key baseline metrics against the imported snapshot within 2%; mismatched builds return a clear error instead of misleading rankings. Successful engine baselines become the build-summary values.
+- The skill panel no longer controls the equipment grid's height: a resize observer locks the scrollable gem panel to the equipment panel's natural 7-by-6 aspect ratio. CDN gem sprites are cropped to their left-side skill icon instead of being centered on the transparent gap between the skill icon and inventory gem artwork.
 
 ## Verification
 
@@ -29,7 +31,7 @@ These results have not been rerun in the current session.
 
 The item-popover change still needs lint, typecheck, tests, and a production build run. They could not run in the current desktop environment because Node/npm and `node_modules` were unavailable; an attempted dependency install did not complete.
 
-The standalone PoB engine test suite passes: 12 tests. Frontend lint, typecheck, tests, and build remain unavailable for the same missing-dependency reason.
+The standalone PoB engine test suite passes: 14 tests. Frontend lint, typecheck, tests, and build remain unavailable for the same missing-dependency reason.
 
 ## Deployment
 

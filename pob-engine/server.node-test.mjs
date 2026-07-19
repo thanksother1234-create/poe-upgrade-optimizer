@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createConcurrencyLimiter, createEvaluationQueue, createPobEngineServer, parseEngineOutput, prepareBuildWithReplacements, replaceItemsInBuildXml } from "./server.mjs";
+import { createConcurrencyLimiter, createEvaluationQueue, createPobEngineServer, parseEngineOutput, prepareBuildWithReplacements, replaceItemsInBuildXml, validateBaseline } from "./server.mjs";
 
 const buildXml = `<PathOfBuilding><Items activeItemSet="2"><Item id="4">Rarity: RARE\nOld Ring\nRuby Ring</Item><ItemSet id="1"><Slot name="Ring 1" itemId="0"/></ItemSet><ItemSet id="2"><Slot itemId="4" name="Ring 1"/></ItemSet></Items></PathOfBuilding>`;
 
@@ -54,6 +54,24 @@ test("limits fresh worker processes across concurrent jobs", async () => {
   })));
   assert.equal(maximum, 2);
   assert.equal(active, 0);
+});
+
+test("accepts a recalculated baseline that matches the imported PoB snapshot", () => {
+  const expected = { totalDps: 1_000_000, effectiveHitPool: 50_000, life: 5_000 };
+  const actual = { totalDps: 1_005_000, effectiveHitPool: 49_900, life: 5_000 };
+  assert.deepEqual(validateBaseline(expected, actual, "CombinedDPS", "CombinedDPS"), []);
+});
+
+test("reports material baseline and DPS-mode mismatches", () => {
+  const mismatches = validateBaseline(
+    { totalDps: 6_700_000, effectiveHitPool: 46_579 },
+    { totalDps: 58_405, effectiveHitPool: 8_011 },
+    "FullDPS",
+    "CombinedDPS",
+  );
+  assert.match(mismatches.join(" "), /saved as FullDPS.*CombinedDPS/i);
+  assert.match(mismatches.join(" "), /totalDps was 6700000.*58405/i);
+  assert.match(mismatches.join(" "), /effectiveHitPool was 46579.*8011/i);
 });
 
 test("queues whole evaluations in FIFO order and reports changing positions", async () => {

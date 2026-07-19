@@ -130,7 +130,12 @@ export class ExactPobCalculationService implements PobCalculationService {
       response = await fetch(new URL("evaluate", baseUrl), {
         method: "POST",
         headers,
-        body: JSON.stringify({ buildXml: build.sourceXml, scenarios }),
+        body: JSON.stringify({
+          buildXml: build.sourceXml,
+          scenarios,
+          expectedBaseline: build.metrics,
+          expectedDpsMetric: build.dpsMetric,
+        }),
         cache: "no-store",
         signal: AbortSignal.timeout(290_000),
       });
