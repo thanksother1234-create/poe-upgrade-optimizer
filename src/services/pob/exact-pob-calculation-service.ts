@@ -1,4 +1,4 @@
-import { Build, BuildMetrics, EquipmentSlot, SimulationResult, TradeItem } from "@/models";
+import { Build, BuildMetrics, DpsMetric, EquipmentSlot, SimulationResult, TradeItem } from "@/models";
 import { subtractMetrics } from "@/lib/metrics";
 import { MvpPobCalculationService, PobBatchSimulationResult, PobCalculationService } from "@/services/pob/pob-calculation-service";
 
@@ -10,10 +10,13 @@ interface EngineScenarioResult {
 
 interface EngineResponse {
   engineVersion?: unknown;
+  dpsMetric?: unknown;
   baseline?: unknown;
   results?: unknown;
   error?: unknown;
 }
+
+const dpsMetrics = new Set<DpsMetric>(["FullDPS", "CombinedDPS", "MinionCombinedDPS", "TotalDPS"]);
 
 export class PobEngineError extends Error {
   constructor(message: string, public readonly status = 502) {
@@ -79,6 +82,7 @@ export class ExactPobCalculationService implements PobCalculationService {
       const id = `${index}:${item.slot}:${item.id}`;
       const result = byId.get(id);
       if (!result) throw new PobEngineError(`The Path of Building engine skipped ${item.name}.`);
+      if (typeof result.error === "string") throw new PobEngineError(`Path of Building could not evaluate ${item.name}: ${result.error}`);
       const metrics = parseMetrics(result.metrics);
       return {
         slot: item.slot,
@@ -88,7 +92,13 @@ export class ExactPobCalculationService implements PobCalculationService {
         verification: "pob" as const,
       };
     });
-    return { baseline: response.baseline, simulations, verification: "pob", engineVersion: response.engineVersion };
+    return {
+      baseline: response.baseline,
+      simulations,
+      verification: "pob",
+      engineVersion: response.engineVersion,
+      dpsMetric: response.dpsMetric,
+    };
   }
 
   private async evaluate(build: Build, scenarios: { id: string; replacements: { slot: EquipmentSlot; rawText: string }[] }[]) {
@@ -123,13 +133,16 @@ export class ExactPobCalculationService implements PobCalculationService {
     const results = Array.isArray(payload.results) ? payload.results as EngineScenarioResult[] : [];
     const parsedResults = results.map((result) => {
       if (typeof result.id !== "string") throw new PobEngineError("The Path of Building engine returned an unidentified scenario.");
-      if (typeof result.error === "string") throw new PobEngineError(result.error);
-      return { id: result.id, metrics: result.metrics };
+      return { id: result.id, metrics: result.metrics, error: typeof result.error === "string" ? result.error : undefined };
     });
+    const dpsMetric = typeof payload.dpsMetric === "string" && dpsMetrics.has(payload.dpsMetric as DpsMetric)
+      ? payload.dpsMetric as DpsMetric
+      : "CombinedDPS";
     return {
       baseline,
       results: parsedResults,
       engineVersion: typeof payload.engineVersion === "string" ? payload.engineVersion : "Path of Building",
+      dpsMetric,
     };
   }
 }

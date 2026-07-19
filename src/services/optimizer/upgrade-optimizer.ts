@@ -111,6 +111,7 @@ export class UpgradeOptimizer {
       baselineMetrics: batch.baseline,
       verification: batch.verification,
       engineVersion: batch.engineVersion,
+      dpsMetric: batch.dpsMetric,
       evaluatedCandidates: batch.simulations.length,
     };
   }

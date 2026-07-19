@@ -13,6 +13,8 @@ license: mit
 
 This HTTP service runs the official Path of Building Community Lua calculation engine. It is separate from Vercel because the engine needs LuaJIT plus the full PoB data directory.
 
+Every baseline and candidate is evaluated in a fresh LuaJIT/PoB process. This prevents Path of Building from retaining the previously loaded item set between comparisons. A shared process limiter allows two PoB workers at a time by default, including across simultaneous HTTP requests, so CPU Basic is not flooded when several users optimize at once.
+
 The root URL and `GET /health` are public status endpoints. `POST /evaluate` requires the `ENGINE_TOKEN` bearer token. The service refuses evaluation requests if `ENGINE_TOKEN` is missing. This service does not contact the PoE trade endpoint; it only runs Path of Building calculations for candidates supplied by the user.
 
 ## Deploy with Hugging Face Pro
@@ -56,6 +58,8 @@ The root URL and `GET /health` are public status endpoints. `POST /evaluate` req
    ```
 
 Do not add a trailing `/evaluate` to `POB_ENGINE_URL`; the web app appends that route. CPU Basic can sleep after extended inactivity, so the first optimization after a long idle period can take longer while the container wakes.
+
+`POB_WORKER_CONCURRENCY` is optional. Keep it at `2` for CPU Basic. Setting it to `1` uses less memory but evaluates candidates more slowly; values above `2` should only be considered after moving to stronger CPU hardware. The service clamps the value to a maximum of `4`.
 
 Run the same `npm.cmd run deploy:engine:hf -- ...` command whenever files in this directory change. The uploader sends the contents of `pob-engine` to the root of the Space repository, which is required for Hugging Face to find `Dockerfile` and this README metadata.
 

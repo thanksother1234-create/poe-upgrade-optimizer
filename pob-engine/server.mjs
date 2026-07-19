@@ -9,6 +9,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_SCENARIOS = 20;
+const DEFAULT_WORKER_CONCURRENCY = 2;
+const MAX_WORKER_CONCURRENCY = 4;
 const SLOT_NAMES = {
   weapon: "Weapon 1",
   offhand: "Weapon 2",
@@ -30,6 +32,30 @@ const METRIC_NAMES = [
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const escapeXmlText = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
+function boundedInteger(value, fallback, minimum, maximum) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+
+export function createConcurrencyLimiter(limit) {
+  const concurrency = boundedInteger(limit, DEFAULT_WORKER_CONCURRENCY, 1, MAX_WORKER_CONCURRENCY);
+  const waiting = [];
+  let active = 0;
+
+  return async function runWithLimit(task) {
+    if (active >= concurrency) await new Promise((resolve) => waiting.push(resolve));
+    active += 1;
+    try {
+      return await task();
+    } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
+}
+
+const runWithWorkerLimit = createConcurrencyLimiter(process.env.POB_WORKER_CONCURRENCY);
+
 function activeItemSetId(xml) {
   const itemsTag = xml.match(/<Items\b([^>]*)>/)?.[1] ?? "";
   return itemsTag.match(/\bactiveItemSet="([^"]+)"/)?.[1] ?? "1";
@@ -44,6 +70,12 @@ function usesSecondWeaponSet(xml, itemSetId) {
 function nextItemId(xml) {
   const ids = [...xml.matchAll(/<Item\b[^>]*\bid="(\d+)"/g)].map((match) => Number(match[1]));
   return Math.max(0, ...ids) + 1;
+}
+
+function copiedItemName(rawText) {
+  const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const rarityIndex = lines.findIndex((line) => /^Rarity:\s*\w+/i.test(line));
+  return rarityIndex >= 0 ? lines[rarityIndex + 1] ?? "" : "";
 }
 
 function addItem(xml, id, rawText) {
@@ -77,12 +109,13 @@ function assignSlot(xml, itemSetId, slotName, itemId) {
   return xml.replace(itemSetPattern, `$1${content}$3`);
 }
 
-export function replaceItemsInBuildXml(buildXml, replacements) {
+export function prepareBuildWithReplacements(buildXml, replacements) {
   if (typeof buildXml !== "string" || !buildXml.includes("<PathOfBuilding")) throw new Error("A valid Path of Building XML export is required.");
-  if (!Array.isArray(replacements) || !replacements.length) return buildXml;
+  if (!Array.isArray(replacements) || !replacements.length) return { xml: buildXml, expectedAssignments: [] };
 
   const itemSetId = activeItemSetId(buildXml);
   const secondWeaponSet = usesSecondWeaponSet(buildXml, itemSetId);
+  const expectedAssignments = [];
   let xml = buildXml;
   let itemId = nextItemId(xml);
   for (const replacement of replacements) {
@@ -93,9 +126,14 @@ export function replaceItemsInBuildXml(buildXml, replacements) {
       : regularSlotName;
     xml = addItem(xml, itemId, replacement.rawText);
     xml = assignSlot(xml, itemSetId, slotName, itemId);
+    expectedAssignments.push({ slotName, itemId, itemName: copiedItemName(replacement.rawText) });
     itemId += 1;
   }
-  return xml;
+  return { xml, expectedAssignments };
+}
+
+export function replaceItemsInBuildXml(buildXml, replacements) {
+  return prepareBuildWithReplacements(buildXml, replacements).xml;
 }
 
 async function readJsonBody(request) {
@@ -124,13 +162,19 @@ const compactDiagnostic = (stdout, stderr) => stripAnsi(`${stderr ?? ""}\n${stdo
 
 export function parseEngineOutput(stdout, scenarioIds, stderr = "") {
   const metricsByIndex = new Map();
+  const dpsMetricByIndex = new Map();
   const errorsByIndex = new Map();
   for (const rawLine of stdout.split(/\r?\n/)) {
     const cleanLine = stripAnsi(rawLine);
-    const markerIndex = Math.max(cleanLine.indexOf("POE_METRICS\t"), cleanLine.indexOf("POE_ERROR\t"));
+    const markerIndex = Math.max(
+      cleanLine.indexOf("POE_METRICS\t"),
+      cleanLine.indexOf("POE_DPS_METRIC\t"),
+      cleanLine.indexOf("POE_ERROR\t"),
+    );
     if (markerIndex < 0) continue;
     const fields = cleanLine.slice(markerIndex).split("\t");
     if (fields[0] === "POE_ERROR") errorsByIndex.set(Number(fields[1]), fields.slice(2).join("\t"));
+    if (fields[0] === "POE_DPS_METRIC") dpsMetricByIndex.set(Number(fields[1]), fields[2]);
     if (fields[0] !== "POE_METRICS") continue;
     const index = Number(fields[1]);
     const values = fields.slice(2).map(Number);
@@ -146,9 +190,42 @@ export function parseEngineOutput(stdout, scenarioIds, stderr = "") {
   const results = scenarioIds.map((id, index) => errorsByIndex.has(index + 1)
     ? { id, error: errorsByIndex.get(index + 1) }
     : metricsByIndex.has(index + 1)
-      ? { id, metrics: metricsByIndex.get(index + 1) }
+      ? { id, metrics: metricsByIndex.get(index + 1), dpsMetric: dpsMetricByIndex.get(index + 1) ?? "CombinedDPS" }
       : { id, error: "Path of Building did not return metrics for this candidate." });
-  return { baseline, results };
+  return { baseline, dpsMetric: dpsMetricByIndex.get(0) ?? "CombinedDPS", results };
+}
+
+const assignmentArgument = ({ slotName, itemId, itemName }) => [slotName, itemId, itemName]
+  .map((value) => String(value).replace(/[\t\r\n]/g, " "))
+  .join("\t");
+
+function workerDiagnostic(error) {
+  const stdout = typeof error?.stdout === "string" ? error.stdout : "";
+  const stderr = typeof error?.stderr === "string" ? error.stderr : "";
+  const diagnostic = compactDiagnostic(stdout, stderr)
+    || (error instanceof Error ? error.message : "Path of Building worker failed.");
+  return diagnostic.replace(/^Baseline build failed:\s*/i, "");
+}
+
+async function evaluateBuildFile({ file, expectedAssignments, worker, pobSource, engineEnvironment, pobRoot }) {
+  return runWithWorkerLimit(async () => {
+    try {
+      const { stdout, stderr } = await execFileAsync(process.env.LUAJIT_PATH ?? "luajit", [
+        worker,
+        file,
+        ...expectedAssignments.map(assignmentArgument),
+      ], {
+        cwd: pobSource,
+        env: { ...engineEnvironment, LUA_PATH: `${join(pobRoot, "runtime/lua/?.lua")};${join(pobRoot, "runtime/lua/?/init.lua")};;` },
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: 100_000,
+      });
+      const parsed = parseEngineOutput(stdout, [], stderr);
+      return { metrics: parsed.baseline, dpsMetric: parsed.dpsMetric };
+    } catch (error) {
+      return { error: workerDiagnostic(error) };
+    }
+  });
 }
 
 export async function evaluateScenarios({ buildXml, scenarios }) {
@@ -162,24 +239,34 @@ export async function evaluateScenarios({ buildXml, scenarios }) {
 
   const directory = await mkdtemp(join(tmpdir(), "poe-pob-"));
   try {
-    const builds = [buildXml, ...scenarios.map((scenario) => replaceItemsInBuildXml(buildXml, scenario.replacements))];
-    const files = await Promise.all(builds.map(async (xml, index) => {
+    const builds = [
+      { xml: buildXml, expectedAssignments: [] },
+      ...scenarios.map((scenario) => prepareBuildWithReplacements(buildXml, scenario.replacements)),
+    ];
+    const files = await Promise.all(builds.map(async (build, index) => {
       const file = join(directory, `${index}.xml`);
-      await writeFile(file, xml, "utf8");
-      return file;
+      await writeFile(file, build.xml, "utf8");
+      return { file, expectedAssignments: build.expectedAssignments };
     }));
     const pobSource = process.env.POB_SOURCE_PATH ?? "/opt/pathofbuilding/src";
     const worker = process.env.POB_WORKER_PATH ?? join(pobSource, "OptimizerWorker.lua");
     const pobRoot = dirname(pobSource);
     const engineEnvironment = { ...process.env };
     delete engineEnvironment.CI;
-    const { stdout, stderr } = await execFileAsync(process.env.LUAJIT_PATH ?? "luajit", [worker, ...files], {
-      cwd: pobSource,
-      env: { ...engineEnvironment, LUA_PATH: `${join(pobRoot, "runtime/lua/?.lua")};${join(pobRoot, "runtime/lua/?/init.lua")};;` },
-      maxBuffer: 4 * 1024 * 1024,
-      timeout: 100_000,
+    const outcomes = await Promise.all(files.map((file) => evaluateBuildFile({
+      ...file, worker, pobSource, engineEnvironment, pobRoot,
+    })));
+    const baseline = outcomes[0];
+    if (!baseline || baseline.error || !baseline.metrics) throw new Error(`Baseline build failed: ${baseline?.error ?? "Path of Building returned no metrics."}`);
+    const results = scenarios.map((scenario, index) => {
+      const outcome = outcomes[index + 1];
+      if (!outcome || outcome.error || !outcome.metrics) return { id: scenario.id, error: outcome?.error ?? "Path of Building returned no metrics for this candidate." };
+      if (outcome.dpsMetric !== baseline.dpsMetric) {
+        return { id: scenario.id, error: `Path of Building changed the DPS metric from ${baseline.dpsMetric} to ${outcome.dpsMetric}; the candidate was not ranked against an inconsistent baseline.` };
+      }
+      return { id: scenario.id, metrics: outcome.metrics };
     });
-    return parseEngineOutput(stdout, scenarios.map((scenario) => scenario.id), stderr);
+    return { baseline: baseline.metrics, dpsMetric: baseline.dpsMetric, results };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

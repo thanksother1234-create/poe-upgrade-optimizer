@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPobEngineServer, parseEngineOutput, replaceItemsInBuildXml } from "./server.mjs";
+import { createConcurrencyLimiter, createPobEngineServer, parseEngineOutput, prepareBuildWithReplacements, replaceItemsInBuildXml } from "./server.mjs";
 
 const buildXml = `<PathOfBuilding><Items activeItemSet="2"><Item id="4">Rarity: RARE\nOld Ring\nRuby Ring</Item><ItemSet id="1"><Slot name="Ring 1" itemId="0"/></ItemSet><ItemSet id="2"><Slot itemId="4" name="Ring 1"/></ItemSet></Items></PathOfBuilding>`;
 
 test("adds the listing text and assigns it in the active item set", () => {
-  const replaced = replaceItemsInBuildXml(buildXml, [{ slot: "ring1", rawText: "Item Class: Rings\nRarity: RARE\nNew & Better\nOpal Ring" }]);
+  const replacement = { slot: "ring1", rawText: "Item Class: Rings\nRarity: RARE\nNew & Better\nOpal Ring" };
+  const replaced = replaceItemsInBuildXml(buildXml, [replacement]);
   assert.match(replaced, /<Item id="5">/);
   assert.match(replaced, /New &amp; Better/);
   assert.match(replaced, /<ItemSet id="2"><Slot itemId="5" name="Ring 1"\/><\/ItemSet>/);
   assert.match(replaced, /<ItemSet id="1"><Slot name="Ring 1" itemId="0"\/><\/ItemSet>/);
+  assert.deepEqual(prepareBuildWithReplacements(buildXml, [replacement]).expectedAssignments, [
+    { slotName: "Ring 1", itemId: 5, itemName: "New & Better" },
+  ]);
 });
 
 test("supports multiple replacements in one scenario", () => {
@@ -30,11 +34,26 @@ test("replaces the active swap weapon when the item set uses its second weapon s
 
 test("parses metrics after Path of Building log prefixes and reports a missing candidate", () => {
   const metricValues = Array.from({ length: 14 }, (_, index) => String(index + 1)).join("\t");
-  const output = `PoB startup log\n\u001b[32mworker: POE_METRICS\t0\t${metricValues}\u001b[0m\n`;
+  const output = `PoB startup log\nworker: POE_DPS_METRIC\t0\tFullDPS\n\u001b[32mworker: POE_METRICS\t0\t${metricValues}\u001b[0m\n`;
   const parsed = parseEngineOutput(output, ["candidate-1"]);
   assert.equal(parsed.baseline.totalDps, 1);
   assert.equal(parsed.baseline.chaosResistance, 14);
+  assert.equal(parsed.dpsMetric, "FullDPS");
   assert.deepEqual(parsed.results, [{ id: "candidate-1", error: "Path of Building did not return metrics for this candidate." }]);
+});
+
+test("limits fresh worker processes across concurrent jobs", async () => {
+  const runLimited = createConcurrencyLimiter(2);
+  let active = 0;
+  let maximum = 0;
+  await Promise.all(Array.from({ length: 6 }, (_, index) => runLimited(async () => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise((resolve) => setTimeout(resolve, 5 + (index % 2)));
+    active -= 1;
+  })));
+  assert.equal(maximum, 2);
+  assert.equal(active, 0);
 });
 
 test("includes worker diagnostics when no baseline marker is returned", () => {

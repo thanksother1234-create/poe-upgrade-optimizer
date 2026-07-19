@@ -6,6 +6,7 @@ export const EQUIPMENT_SLOTS = [
 export type EquipmentSlot = (typeof EQUIPMENT_SLOTS)[number];
 export type OptimizationGoal = "dps" | "survivability" | "balanced";
 export type CurrencyUnit = "chaos" | "divine";
+export type DpsMetric = "FullDPS" | "CombinedDPS" | "MinionCombinedDPS" | "TotalDPS";
 
 export interface CurrencyAmount { amount: number; currency: CurrencyUnit }
 export interface ItemModifier { label: string; value: number; metric?: keyof BuildMetrics }
@@ -25,7 +26,7 @@ export interface BuildMetrics {
   spellSuppression: number; fireResistance: number; coldResistance: number;
   lightningResistance: number; chaosResistance: number;
 }
-export interface Build { id: string; character: Character; equipment: Equipment; metrics: BuildMetrics; sourceXml?: string }
+export interface Build { id: string; character: Character; equipment: Equipment; metrics: BuildMetrics; sourceXml?: string; dpsMetric?: DpsMetric }
 export type CalculationVerification = "estimated" | "pob";
 export type CandidateVerdict = "upgrade" | "downgrade" | "mixed" | "unchanged";
 export interface SimulationResult {
@@ -61,6 +62,7 @@ export interface OptimizationResult {
   baselineMetrics: BuildMetrics;
   verification: CalculationVerification;
   engineVersion?: string;
+  dpsMetric?: DpsMetric;
   evaluatedCandidates: number;
 }
 export interface PoeLeague { id: string; name: string; realm: "pc"; startAt: string | null; endAt: string | null }

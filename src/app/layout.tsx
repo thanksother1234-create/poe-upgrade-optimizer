@@ -31,6 +31,7 @@ export default function RootLayout({
     >
       <body className="min-h-full">
         <TooltipProvider>{children}</TooltipProvider>
+        <Analytics />
       </body>
     </html>
   );
