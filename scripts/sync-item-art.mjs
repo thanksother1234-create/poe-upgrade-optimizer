@@ -7,6 +7,7 @@ const EQUIPMENT_CLASSES = new Set([
   "Amulet", "Belt", "Body Armour", "Boots", "Bow", "Claw", "Dagger", "Fishing Rod", "Gloves", "Helmet",
   "One Hand Axe", "One Hand Mace", "One Hand Sword", "Quiver", "Ring", "Rune Dagger", "Sceptre", "Shield",
   "Staff", "Thrusting One Hand Sword", "Two Hand Axe", "Two Hand Mace", "Two Hand Sword", "Wand", "Warstaff",
+  "Flask", "LifeFlask", "ManaFlask", "HybridFlask", "UtilityFlask",
 ]);
 
 async function loadJson(filename) {

@@ -30,18 +30,18 @@ const slotLayout: Record<EquipmentSlot, string> = {
   bodyArmour: "col-start-4 col-span-3 row-start-3 row-span-3",
   gloves: "col-start-1 col-span-2 row-start-6 row-span-2",
   boots: "col-start-9 col-span-2 row-start-6 row-span-2",
-  amulet: "col-start-7 row-start-1",
+  amulet: "col-start-7 col-span-2 row-start-1",
   ring1: "col-start-3 row-start-3",
-  ring2: "col-start-7 row-start-3",
+  ring2: "col-start-7 col-span-2 row-start-3",
   belt: "col-start-4 col-span-3 row-start-6 row-span-2",
 };
 
 const flaskLayouts = [
-  "col-start-1 col-span-2 row-start-8 row-span-2",
-  "col-start-3 col-span-2 row-start-8 row-span-2",
-  "col-start-5 col-span-2 row-start-8 row-span-2",
-  "col-start-7 col-span-2 row-start-8 row-span-2",
-  "col-start-9 col-span-2 row-start-8 row-span-2",
+  "col-start-3 row-start-8 row-span-2",
+  "col-start-4 row-start-8 row-span-2",
+  "col-start-5 row-start-8 row-span-2",
+  "col-start-6 row-start-8 row-span-2",
+  "col-start-7 row-start-8 row-span-2",
 ];
 
 const rarityStyles: Record<Item["rarity"], { border: string; glow: string; name: string }> = {
