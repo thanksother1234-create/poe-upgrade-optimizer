@@ -1,7 +1,13 @@
 import { BuildMetrics, CurrencyAmount } from "@/models";
 
 export const DIVINE_TO_CHAOS = 180;
-export const toChaos = (value: CurrencyAmount) => value.currency === "divine" ? value.amount * DIVINE_TO_CHAOS : value.amount;
+// Mirror listings are always outside the supported chaos/divine budget range. A
+// finite sentinel keeps queued payloads JSON-safe without pretending to provide
+// a live Mirror exchange rate.
+export const MIRROR_LISTING_CHAOS_SENTINEL = 1_000_000_000_000;
+export const toChaos = (value: CurrencyAmount) => value.currency === "mirror"
+  ? value.amount * MIRROR_LISTING_CHAOS_SENTINEL
+  : value.currency === "divine" ? value.amount * DIVINE_TO_CHAOS : value.amount;
 export const formatNumber = (value: number) => Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 export const formatPrice = (chaos: number) => chaos >= DIVINE_TO_CHAOS ? `${(chaos / DIVINE_TO_CHAOS).toFixed(1)} div` : `${chaos}c`;
 export const percentChange = (before: number, delta: number) => before === 0 ? 0 : (delta / before) * 100;
