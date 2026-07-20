@@ -14,6 +14,7 @@ Last updated: 2026-07-20
 - Production PoB comparisons now support a durable Redis-backed asynchronous FIFO queue. Vercel validates the comparison, stores it, and returns a job ID immediately; the Hugging Face engine atomically claims jobs and stores exact PoB metrics; Vercel converts those metrics into the existing ranked result when the browser polls. The default waiting capacity is 100 jobs with one active comparison on CPU Basic.
 - Durable jobs and results expire after 24 hours. A separate expiring lease and heartbeat recover an interrupted running job after a worker restart without allowing two workers to finish the same claim. One unfinished job is allowed per anonymous browser identity.
 - The UI displays live position, total waiting count, running state, and cancellation. It saves the active job ID in browser local storage, resumes polling after a close or reload, and can render completed results without re-importing the build. When Redis is intentionally unconfigured, local development retains the original direct streaming queue.
+- The engine Dockerfile explicitly copies `durable-queue.mjs` beside `server.mjs`. The first deployment attempt omitted that imported module from `/app`, causing an `ERR_MODULE_NOT_FOUND` runtime failure even though the Space repository contained the source file.
 - The equipment view is left-aligned in a two-column layout with a new `Skills & supports` panel. The PoB parser imports active socket groups, linked gems, support status, levels, quality, slot labels, and the main skill directly from the active skill set.
 - Equipment slots use a symmetric 9-by-9 square grid with smaller artwork bounds. Ring 1 sits immediately left of the body armour; Ring 2 and the amulet use matching one-cell jewelry proportions immediately to its right. Weapon/offhand and gloves/boots remain balanced on opposite sides.
 - The equipment panel now uses a taller 10-by-9 layout and imports all five active flask slots beneath the worn gear. Flasks use the same CDN artwork lookup, rarity styling, full raw-stat tooltip, keyboard focus, and hover interaction as armour while remaining display-only (they are not offered as armour/weapon replacement targets).
@@ -31,7 +32,7 @@ Last updated: 2026-07-20
 ## Verification
 
 - Exact PoB 2.65 headless regression: attached Lethal Pride baseline and both supplied replacements reproduced successfully.
-- Engine tests: 19 passed, including durable FIFO claiming and expired-lease recovery.
+- Engine tests: 20 passed, including durable FIFO claiming, expired-lease recovery, and Docker runtime-module coverage.
 - Application tests: 60 passed, including durable payload compaction, result finalization, and one-active-job enforcement.
 - ESLint passed.
 - TypeScript passed.

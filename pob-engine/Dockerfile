@@ -19,7 +19,7 @@ RUN node /tmp/prepare-timeless-data.mjs /opt/pathofbuilding/src/Data/TimelessJew
 
 COPY OptimizerWorker.lua /opt/pathofbuilding/src/OptimizerWorker.lua
 WORKDIR /app
-COPY package.json server.mjs ./
+COPY package.json server.mjs durable-queue.mjs ./
 
 RUN addgroup -g 1000 -S optimizer \
     && adduser -u 1000 -S optimizer -G optimizer \
