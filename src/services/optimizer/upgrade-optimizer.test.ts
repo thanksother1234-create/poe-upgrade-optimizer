@@ -9,6 +9,22 @@ import { classifyCandidateVerdict, UpgradeOptimizer } from "./upgrade-optimizer"
 
 const optimizer = new UpgradeOptimizer(new MockPobCalculationService(), new MockTradeMarketService());
 const run = (goal: OptimizationGoal, amount = 5) => optimizer.optimize({ build: mockBuild, budget: { amount, currency: "divine" }, goal, allowedSlots: ["weapon", "ring1", "ring2", "boots", "amulet"], league: "Standard" });
+const improvingPob: PobCalculationService = {
+  importBuild: async () => structuredClone(mockBuild),
+  calculateBuild: async (build) => structuredClone(build.metrics),
+  simulateItemReplacement: async () => { throw new Error("not used"); },
+  simulateItemReplacements: async (build, items) => ({
+    baseline: structuredClone(build.metrics),
+    simulations: items.map((item) => ({
+      slot: item.slot,
+      item,
+      metrics: { ...build.metrics, totalDps: build.metrics.totalDps + 100_000 },
+      changes: zeroMetrics(),
+      verification: "pob" as const,
+    })),
+    verification: "pob" as const,
+  }),
+};
 
 describe("UpgradeOptimizer", () => {
   it("classifies the actual PoB outcome independently from recommendation eligibility", () => {
@@ -63,22 +79,6 @@ Synthesised Kinetic Wand
 Note: ~b/o 10000 divine`,
       league: "Mirage",
     });
-    const improvingPob: PobCalculationService = {
-      importBuild: async () => structuredClone(mockBuild),
-      calculateBuild: async (build) => structuredClone(build.metrics),
-      simulateItemReplacement: async () => { throw new Error("not used"); },
-      simulateItemReplacements: async (build, items) => ({
-        baseline: structuredClone(build.metrics),
-        simulations: items.map((item) => ({
-          slot: item.slot,
-          item,
-          metrics: { ...build.metrics, totalDps: build.metrics.totalDps + 100_000 },
-          changes: zeroMetrics(),
-          verification: "pob" as const,
-        })),
-        verification: "pob" as const,
-      }),
-    };
     const result = await new UpgradeOptimizer(improvingPob, new ManualTradeMarketService([expensiveWand])).optimize({
       build: mockBuild,
       budget: { amount: 5, currency: "divine" },
@@ -91,6 +91,32 @@ Note: ~b/o 10000 divine`,
     expect(result.candidateEvaluations[0]).toMatchObject({ verdict: "upgrade", qualified: false });
     expect(result.candidateEvaluations[0].changes.totalDps).toBe(100_000);
     expect(result.candidateEvaluations[0].rejectionReasons.join(" ")).toMatch(/above your 5 divine budget/i);
+    expect(result.recommendations).toHaveLength(0);
+  });
+
+  it("evaluates an unpriced item without treating it as budget-qualified", async () => {
+    const unpricedWand = parseCopiedTradeItem({
+      id: "unpriced-wand",
+      slot: "weapon",
+      rawText: `Item Class: Wands
+Rarity: Rare
+Unpriced Upgrade
+Kinetic Wand
+--------
+109% increased Spell Damage`,
+      league: "Mirage",
+    });
+    const result = await new UpgradeOptimizer(improvingPob, new ManualTradeMarketService([unpricedWand])).optimize({
+      build: mockBuild,
+      budget: { amount: 5, currency: "divine" },
+      goal: "dps",
+      allowedSlots: ["weapon"],
+      league: "Mirage",
+    });
+
+    expect(result.evaluatedCandidates).toBe(1);
+    expect(result.candidateEvaluations[0]).toMatchObject({ verdict: "upgrade", qualified: false });
+    expect(result.candidateEvaluations[0].rejectionReasons.join(" ")).toMatch(/no listing price was included/i);
     expect(result.recommendations).toHaveLength(0);
   });
 

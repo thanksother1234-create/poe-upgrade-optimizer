@@ -71,7 +71,13 @@ describe("manual trade candidates", () => {
     expect(parseCopiedItemPrice(copiedRing)).toEqual({ amount: 2, currency: "divine" });
     expect(parseCopiedItemPrice("Item Class: Rings\nNote: ~b/o 75 chaos")).toEqual({ amount: 75, currency: "chaos" });
     expect(parseCopiedItemPrice("Item Class: Rings\nNote: ~b/o 15 mirror")).toEqual({ amount: 15, currency: "mirror" });
-    expect(() => parseCopiedItemPrice("Item Class: Rings\nRarity: Rare")).toThrow(/needs its trade note/i);
+    expect(parseCopiedItemPrice("Item Class: Rings\nRarity: Rare")).toBeNull();
+  });
+
+  it("accepts copied items without a listing note", () => {
+    const rawText = copiedRing.replace(/\nNote:.*$/i, "");
+    const item = parseCopiedTradeItem({ id: "unpriced", slot: "ring1", rawText, league: "Mirage" });
+    expect(item.price).toEqual({ amount: 0, currency: "chaos" });
   });
 
   it("validates the selected equipment slot", () => {
