@@ -65,6 +65,7 @@ export function createDurableQueueWorker({
   pollMs = process.env.POB_ASYNC_WORKER_POLL_MS,
   leaseMs = process.env.POB_ASYNC_WORKER_LEASE_MS,
   workerId = `${process.env.HOSTNAME ?? "pob-worker"}:${randomUUID()}`,
+  logger = console,
 } = {}) {
   if (typeof evaluate !== "function") throw new Error("A Path of Building evaluator is required.");
   const workerConcurrency = boundedInteger(concurrency, 1, 1, 2);
@@ -81,6 +82,11 @@ export function createDurableQueueWorker({
   let stopped = true;
   let ticking = false;
   let lastError;
+
+  const writeLog = (level, event, details = {}) => {
+    const method = typeof logger?.[level] === "function" ? logger[level].bind(logger) : logger?.log?.bind(logger);
+    method?.(JSON.stringify({ timestamp: new Date().toISOString(), service: "pob-worker", event, workerId, ...details }));
+  };
 
   const save = async (job) => {
     job.updatedAt = new Date().toISOString();
@@ -125,12 +131,18 @@ export function createDurableQueueWorker({
         await redis.command("LREM", processingKey, 0, id);
         continue;
       }
+      const resumed = Boolean(job.startedAt);
       job.state = "running";
       job.startedAt ??= new Date().toISOString();
       job.workerId = workerId;
       job.leaseUntil = Date.now() + jobLeaseMs;
       await redis.command("SET", leaseKey(job.id), workerId, "PX", jobLeaseMs);
       await save(job);
+      writeLog("info", resumed ? "job_resumed" : "job_started", {
+        jobId: job.id,
+        scenarioCount: job.payload.engineRequest.scenarios?.length ?? 0,
+        queuedMs: Math.max(0, Date.now() - Date.parse(job.createdAt)),
+      });
       return job;
     }
   };
@@ -140,8 +152,12 @@ export function createDurableQueueWorker({
   };
 
   const processJob = async (claimed) => {
+    const attemptStartedAt = Date.now();
     const heartbeatTimer = setInterval(() => {
-      heartbeat(claimed.id).catch((error) => { lastError = error instanceof Error ? error.message : String(error); });
+      heartbeat(claimed.id).catch((error) => {
+        lastError = error instanceof Error ? error.message : String(error);
+        writeLog("warn", "heartbeat_failed", { jobId: claimed.id, error: lastError });
+      });
     }, Math.max(10_000, Math.floor(jobLeaseMs / 3)));
     try {
       const result = await evaluate(claimed.payload.engineRequest);
@@ -149,6 +165,7 @@ export function createDurableQueueWorker({
       if (!current) return;
       if (current.state === "cancelled") {
         await clearProcessing(claimed.id);
+        writeLog("info", "job_cancelled", { jobId: claimed.id, processingMs: Date.now() - attemptStartedAt });
         return;
       }
       if (current.workerId !== workerId) return;
@@ -158,24 +175,45 @@ export function createDurableQueueWorker({
       delete current.payload.engineRequest;
       delete current.workerId;
       delete current.leaseUntil;
-      if (await saveIfOwned(current)) await release(current);
+      const persisted = await saveIfOwned(current);
+      if (persisted) await release(current);
       else await clearProcessing(claimed.id);
+      writeLog("info", "job_completed", {
+        jobId: claimed.id,
+        scenarioCount: claimed.payload.engineRequest.scenarios?.length ?? 0,
+        processingMs: Date.now() - attemptStartedAt,
+        totalProcessingMs: Math.max(0, Date.now() - Date.parse(claimed.startedAt)),
+        persisted,
+      });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Path of Building evaluation failed.";
       const current = await load(claimed.id).catch(() => claimed);
-      if (!current) return;
+      if (!current) {
+        writeLog("error", "job_failed", { jobId: claimed.id, processingMs: Date.now() - attemptStartedAt, error: errorMessage });
+        return;
+      }
       if (current.state === "cancelled") {
         await clearProcessing(claimed.id);
+        writeLog("info", "job_cancelled", { jobId: claimed.id, processingMs: Date.now() - attemptStartedAt });
         return;
       }
       if (current.workerId !== workerId) return;
       current.state = "failed";
       current.completedAt = new Date().toISOString();
-      current.error = error instanceof Error ? error.message : "Path of Building evaluation failed.";
+      current.error = errorMessage;
       delete current.payload.engineRequest;
       delete current.workerId;
       delete current.leaseUntil;
-      if (await saveIfOwned(current)) await release(current);
+      const persisted = await saveIfOwned(current);
+      if (persisted) await release(current);
       else await clearProcessing(claimed.id);
+      writeLog("error", "job_failed", {
+        jobId: claimed.id,
+        processingMs: Date.now() - attemptStartedAt,
+        totalProcessingMs: Math.max(0, Date.now() - Date.parse(claimed.startedAt)),
+        persisted,
+        error: errorMessage,
+      });
     } finally {
       clearInterval(heartbeatTimer);
     }
@@ -195,6 +233,7 @@ export function createDurableQueueWorker({
       delete job.leaseUntil;
       await save(job);
       await redis.command("EVAL", REQUEUE_SCRIPT, 2, processingKey, waitingKey, id);
+      writeLog("warn", "job_requeued", { jobId: id, reason: "expired_lease" });
     }
   };
 
@@ -243,9 +282,10 @@ export function createDurableQueueWorker({
       if (!redis.configured || !stopped) return;
       stopped = false;
       try { await recoverExpired(); } catch (error) { lastError = error instanceof Error ? error.message : String(error); }
+      writeLog("info", "worker_started", { concurrency: workerConcurrency, pollMs: idlePollMs, leaseMs: jobLeaseMs });
       schedule(0);
     },
-    stop() { stopped = true; clearTimeout(timer); },
+    stop() { stopped = true; clearTimeout(timer); writeLog("info", "worker_stopped", { active }); },
     runOnce,
     recoverExpired,
     status: () => ({

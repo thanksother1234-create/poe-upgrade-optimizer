@@ -16,6 +16,8 @@ Last updated: 2026-07-20
 - Section 3 now explains that its choices become the default PoE Trade filters. The manual candidate form no longer asks for a duplicate listing price. A copied `Note: ~price ...` or `Note: ~b/o ...` line is optional; when present, both the browser and API derive its chaos, divine, or mirror price. Unpriced items are still evaluated by PoB and display `Price not included`, but are not declared budget-qualified because no price is available. Mirror listings are treated as outside the chaos/divine budget range without inventing a live exchange rate.
 - Durable jobs and results expire after 24 hours. A separate expiring lease and heartbeat recover an interrupted running job after a worker restart without allowing two workers to finish the same claim. One unfinished job is allowed per anonymous browser identity.
 - The UI displays live position, total waiting count, running state, and cancellation. It saves the active job ID in browser local storage, resumes polling after a close or reload, and can render completed results without re-importing the build. When Redis is intentionally unconfigured, local development retains the original direct streaming queue.
+- Running comparisons now display an elapsed-seconds counter in the action button, active status panel, and restored-job banner. The timer is anchored to the worker-persisted `startedAt`, so refreshes do not reset it; direct local streaming falls back to the browser-observed start time.
+- The durable Hugging Face worker emits one-line JSON operational logs for worker lifecycle, job start/resume, completion, failure, cancellation, heartbeat failure, and expired-lease requeue. Job logs include job ID, scenario count, queue wait, current-attempt duration, total processing duration, and persistence outcome, but never the PoB XML or copied item text.
 - The engine Dockerfile explicitly copies `durable-queue.mjs` beside `server.mjs`. The first deployment attempt omitted that imported module from `/app`, causing an `ERR_MODULE_NOT_FOUND` runtime failure even though the Space repository contained the source file.
 - The equipment view is left-aligned in a two-column layout with a new `Skills & supports` panel. The PoB parser imports active socket groups, linked gems, support status, levels, quality, slot labels, and the main skill directly from the active skill set.
 - Equipment slots use a symmetric 9-by-9 square grid with smaller artwork bounds. Ring 1 sits immediately left of the body armour; Ring 2 and the amulet use matching one-cell jewelry proportions immediately to its right. Weapon/offhand and gloves/boots remain balanced on opposite sides.
@@ -34,7 +36,7 @@ Last updated: 2026-07-20
 ## Verification
 
 - Exact PoB 2.65 headless regression: attached Lethal Pride baseline and both supplied replacements reproduced successfully.
-- Engine tests: 20 passed, including durable FIFO claiming, expired-lease recovery, and Docker runtime-module coverage.
+- Engine tests: 21 passed, including structured success/failure timing logs, durable FIFO claiming, expired-lease recovery, and Docker runtime-module coverage.
 - Application tests: 66 passed, including optional copied listing-note parsing, unpriced-item evaluation, over-budget direct and durable-queue comparisons, durable payload compaction, result finalization, and one-active-job enforcement.
 - ESLint passed.
 - TypeScript passed.
@@ -45,13 +47,13 @@ Last updated: 2026-07-20
 ## Deployment
 
 - The previously deployed Hugging Face timeless-jewel fix remains live and was confirmed by the user.
-- The durable queue is returning hosted comparison jobs. The over-budget and copied-price-note application changes in this handoff are Vercel-only and are not yet deployed.
+- The durable queue is returning hosted comparison jobs. The live elapsed timer requires a Vercel deployment, and the structured worker logs require a Hugging Face engine deployment.
 
 ## Next steps
 
-1. Redeploy Vercel, then paste the supplied Pandemonium Spell with `Note: ~b/o 10000 divine` and compare it against a 5-divine budget. Confirm the price is read automatically, the page reports `1 checked`, shows the PoB metric differences, and separately marks it above budget.
-2. Confirm the Hugging Face `/health` response still reports `durableQueue.configured: true` and `running: true`; this fix does not require an engine redeployment.
-3. Submit a production comparison, reload while it is queued, and verify that its position resumes and its final result remains available.
+1. Deploy the Hugging Face engine, then confirm its container logs emit `worker_started` as a one-line JSON event and `/health` still reports `durableQueue.configured: true` and `running: true`.
+2. Deploy Vercel, submit a production comparison, and confirm the running state counts upward in seconds. Reload while it is running and verify the timer resumes from the persisted worker start rather than zero.
+3. Confirm a completed or failed worker job emits its duration in a `job_completed` or `job_failed` JSON event.
 4. After every code change, update this file with the date, summary, affected files or behavior, verification results, and remaining work.
 
 ## Maintenance convention
