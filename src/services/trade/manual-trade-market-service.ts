@@ -28,8 +28,21 @@ export interface ManualTradeCandidateInput {
   id: string;
   slot: EquipmentSlot;
   rawText: string;
-  price: CurrencyAmount;
+  price?: CurrencyAmount;
   league: string;
+}
+
+const LISTING_NOTE = /^Note:\s*~(?:price|b\/o)\s+(\d+(?:\.\d+)?)\s+(divine|chaos|mirror)(?:\s+orbs?)?\s*$/i;
+
+export function parseCopiedItemPrice(rawText: string): CurrencyAmount {
+  const note = rawText.split(/\r?\n/).map((line) => line.trim()).findLast((line) => /^Note:/i.test(line));
+  const match = note?.match(LISTING_NOTE);
+  if (!match) {
+    throw new Error("The copied item needs its trade note, such as `Note: ~price 2 divine` or `Note: ~b/o 50 chaos`.");
+  }
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("The copied item's trade note contains an invalid price.");
+  return { amount, currency: match[2].toLowerCase() as CurrencyAmount["currency"] };
 }
 
 export function parseCopiedTradeItem(input: ManualTradeCandidateInput): TradeItem {
@@ -45,8 +58,9 @@ export function parseCopiedTradeItem(input: ManualTradeCandidateInput): TradeIte
   const name = displayLines[0];
   const baseType = rarity === "normal" ? displayLines[0] : displayLines[1];
   if (!name || !baseType) throw new Error("The copied item is missing its name or base type.");
-  if (!Number.isFinite(input.price.amount) || input.price.amount <= 0 || !["chaos", "divine"].includes(input.price.currency)) {
-    throw new Error("Enter the listing price in chaos or divine orbs.");
+  const price = input.price ?? parseCopiedItemPrice(rawText);
+  if (!Number.isFinite(price.amount) || price.amount <= 0 || !["chaos", "divine", "mirror"].includes(price.currency)) {
+    throw new Error("Use a chaos, divine, or mirror listing note.");
   }
 
   const displayEnd = rarityIndex + (rarity === "normal" ? 2 : 3);
@@ -64,7 +78,7 @@ export function parseCopiedTradeItem(input: ManualTradeCandidateInput): TradeIte
     itemClass,
     rarity,
     modifiers,
-    price: input.price,
+    price,
     rawText,
     tradeUrl: createTradeSiteUrl(input.league),
   };

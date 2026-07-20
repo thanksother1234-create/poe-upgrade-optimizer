@@ -13,6 +13,7 @@ Last updated: 2026-07-20
 - Equipped-item detail popovers hide internal `Unique ID` and `ArmourBasePercentile` fields, remove `{crafted}` markup, and group imported stats into cleaner bordered sections.
 - Production PoB comparisons now support a durable Redis-backed asynchronous FIFO queue. Vercel validates the comparison, stores it, and returns a job ID immediately; the Hugging Face engine atomically claims jobs and stores exact PoB metrics; Vercel converts those metrics into the existing ranked result when the browser polls. The default waiting capacity is 100 jobs with one active comparison on CPU Basic.
 - Compatible pasted candidates are always sent to PoB even when their entered listing price exceeds the selected budget. Their comparison card still shows the exact upgrade/downgrade and metric deltas; budget is applied afterward as recommendation eligibility with an explicit over-budget reason. This fixes the misleading `0 checked` result produced by a 10,000-divine candidate under a 5-divine budget.
+- Section 3 now explains that its choices become the default PoE Trade filters. The manual candidate form no longer asks for a duplicate listing price: both the browser and API derive it from copied `Note: ~price ...` or `Note: ~b/o ...` text. Chaos, divine, and mirror notes are supported; mirror listings are treated as outside the chaos/divine budget range without inventing a live exchange rate.
 - Durable jobs and results expire after 24 hours. A separate expiring lease and heartbeat recover an interrupted running job after a worker restart without allowing two workers to finish the same claim. One unfinished job is allowed per anonymous browser identity.
 - The UI displays live position, total waiting count, running state, and cancellation. It saves the active job ID in browser local storage, resumes polling after a close or reload, and can render completed results without re-importing the build. When Redis is intentionally unconfigured, local development retains the original direct streaming queue.
 - The engine Dockerfile explicitly copies `durable-queue.mjs` beside `server.mjs`. The first deployment attempt omitted that imported module from `/app`, causing an `ERR_MODULE_NOT_FOUND` runtime failure even though the Space repository contained the source file.
@@ -34,21 +35,21 @@ Last updated: 2026-07-20
 
 - Exact PoB 2.65 headless regression: attached Lethal Pride baseline and both supplied replacements reproduced successfully.
 - Engine tests: 20 passed, including durable FIFO claiming, expired-lease recovery, and Docker runtime-module coverage.
-- Application tests: 63 passed, including over-budget direct and durable-queue comparisons, durable payload compaction, result finalization, and one-active-job enforcement.
+- Application tests: 64 passed, including copied listing-note parsing, over-budget direct and durable-queue comparisons, durable payload compaction, result finalization, and one-active-job enforcement.
 - ESLint passed.
 - TypeScript passed.
 - Production build passed (existing Vinext chunk/dynamic-import warnings only).
-- Local browser smoke test passed with no console warnings or errors.
+- Local browser smoke test passed with no console warnings or errors. It verified that the price field is absent, a `~b/o 10000 divine` note saves as `10000 div`, the new trade-filter helper is visible, and the 390px layout has no horizontal overflow.
 - Docker image build was not run because Docker is unavailable in this desktop environment; the image preparation step was exercised directly against PoB 2.65's complete timeless-jewel dataset.
 
 ## Deployment
 
 - The previously deployed Hugging Face timeless-jewel fix remains live and was confirmed by the user.
-- The durable queue is returning hosted comparison jobs. The over-budget comparison fix in this handoff is a Vercel/application-only change and is not yet deployed.
+- The durable queue is returning hosted comparison jobs. The over-budget and copied-price-note application changes in this handoff are Vercel-only and are not yet deployed.
 
 ## Next steps
 
-1. Redeploy Vercel, then compare the supplied Pandemonium Spell at 10,000 divine against a 5-divine budget. Confirm the page reports `1 checked`, shows the PoB metric differences, and separately marks it above budget.
+1. Redeploy Vercel, then paste the supplied Pandemonium Spell with `Note: ~b/o 10000 divine` and compare it against a 5-divine budget. Confirm the price is read automatically, the page reports `1 checked`, shows the PoB metric differences, and separately marks it above budget.
 2. Confirm the Hugging Face `/health` response still reports `durableQueue.configured: true` and `running: true`; this fix does not require an engine redeployment.
 3. Submit a production comparison, reload while it is queued, and verify that its position resumes and its final result remains available.
 4. After every code change, update this file with the date, summary, affected files or behavior, verification results, and remaining work.

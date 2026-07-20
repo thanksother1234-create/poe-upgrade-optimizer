@@ -6,7 +6,7 @@ export const EQUIPMENT_SLOTS = [
 export type EquipmentSlot = (typeof EQUIPMENT_SLOTS)[number];
 export type RingSlot = Extract<EquipmentSlot, "ring1" | "ring2">;
 export type OptimizationGoal = "dps" | "survivability" | "balanced";
-export type CurrencyUnit = "chaos" | "divine";
+export type CurrencyUnit = "chaos" | "divine" | "mirror";
 export type DpsMetric = "FullDPS" | "CombinedDPS" | "MinionCombinedDPS" | "TotalDPS";
 
 export interface CurrencyAmount { amount: number; currency: CurrencyUnit }

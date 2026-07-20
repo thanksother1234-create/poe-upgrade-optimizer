@@ -44,17 +44,12 @@ function optimizationInput(value: unknown) {
     if (!value || typeof value !== "object") throw new PobEngineError(`Candidate ${index + 1} is invalid.`, 400);
     const candidate = value as Record<string, unknown>;
     const slot = candidate.slot as EquipmentSlot;
-    const price = candidate.price as Partial<CurrencyAmount> | undefined;
     if (!slots.has(slot) || !allowedSlots.includes(slot)) throw new PobEngineError(`Candidate ${index + 1} uses a slot that is not selected.`, 400);
-    if (!price || !Number.isFinite(price.amount) || Number(price.amount) <= 0 || !["chaos", "divine"].includes(String(price.currency))) {
-      throw new PobEngineError(`Candidate ${index + 1} needs a valid chaos or divine price.`, 400);
-    }
     try {
       const item = parseCopiedTradeItem({
         id: `manual-${index + 1}`,
         slot,
         rawText: typeof candidate.rawText === "string" ? candidate.rawText : "",
-        price: { amount: Number(price.amount), currency: price.currency as CurrencyAmount["currency"] },
         league,
       });
       if (!isManualCandidateCompatible(build, item)) throw new Error(`${item.name} is not compatible with ${slot}.`);

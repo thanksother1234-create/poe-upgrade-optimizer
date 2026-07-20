@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mockBuild } from "@/mocks/build";
-import { isManualCandidateCompatible, ManualTradeMarketService, parseCopiedTradeItem } from "./manual-trade-market-service";
+import { isManualCandidateCompatible, ManualTradeMarketService, parseCopiedItemPrice, parseCopiedTradeItem } from "./manual-trade-market-service";
 
 const copiedRing = `Item Class: Rings
 Rarity: Rare
@@ -52,17 +52,26 @@ Attacks with this Weapon Penetrate 16% Chaos Resistance
 --------
 Split
 --------
-Synthesised Item`;
+Synthesised Item
+--------
+Note: ~b/o 10000 divine`;
 
 describe("manual trade candidates", () => {
   it("parses copied item text without using the PoE trade API", () => {
-    const item = parseCopiedTradeItem({ id: "manual-1", slot: "ring1", rawText: copiedRing, price: { amount: 2, currency: "divine" }, league: "Mirage" });
+    const item = parseCopiedTradeItem({ id: "manual-1", slot: "ring1", rawText: copiedRing, league: "Mirage" });
     expect(item).toMatchObject({
       id: "manual-1", slot: "ring1", name: "Gloom Circle", baseType: "Opal Ring", itemClass: "Rings",
       price: { amount: 2, currency: "divine" }, tradeUrl: "https://www.pathofexile.com/trade/search/Mirage",
     });
     expect(item.modifiers.map((modifier) => modifier.label)).toContain("+70 to maximum Life");
     expect(item.rawText).toBe(copiedRing);
+  });
+
+  it("reads both fixed-price and buyout notes from copied trade items", () => {
+    expect(parseCopiedItemPrice(copiedRing)).toEqual({ amount: 2, currency: "divine" });
+    expect(parseCopiedItemPrice("Item Class: Rings\nNote: ~b/o 75 chaos")).toEqual({ amount: 75, currency: "chaos" });
+    expect(parseCopiedItemPrice("Item Class: Rings\nNote: ~b/o 15 mirror")).toEqual({ amount: 15, currency: "mirror" });
+    expect(() => parseCopiedItemPrice("Item Class: Rings\nRarity: Rare")).toThrow(/needs its trade note/i);
   });
 
   it("validates the selected equipment slot", () => {
@@ -84,7 +93,6 @@ describe("manual trade candidates", () => {
       id: "pandemonium-spell",
       slot: "weapon",
       rawText: copiedPandemoniumSpell,
-      price: { amount: 10_000, currency: "divine" },
       league: "Mirage",
     });
     const service = new ManualTradeMarketService([wand]);

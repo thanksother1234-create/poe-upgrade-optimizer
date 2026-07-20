@@ -58,8 +58,9 @@ Rarity: Rare
 Pandemonium Spell
 Synthesised Kinetic Wand
 --------
-109% increased Spell Damage`,
-      price: { amount: 10_000, currency: "divine" },
+109% increased Spell Damage
+--------
+Note: ~b/o 10000 divine`,
       league: "Mirage",
     });
     const improvingPob: PobCalculationService = {
