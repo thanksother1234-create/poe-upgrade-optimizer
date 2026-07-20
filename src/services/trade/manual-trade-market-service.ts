@@ -1,5 +1,4 @@
 import { Build, CurrencyAmount, EquipmentSlot, ItemRarity, TradeItem } from "@/models";
-import { toChaos } from "@/lib/metrics";
 import { createTradeSiteUrl } from "@/services/trade/trade-search-service";
 import { TradeMarketService } from "@/services/trade/trade-market-service";
 import { getTradeCategory } from "@/services/trade/trade-categories";
@@ -84,9 +83,9 @@ export class ManualTradeMarketService implements TradeMarketService {
   constructor(private readonly candidates: TradeItem[]) {}
 
   async searchUpgrades(build: Build, slot: EquipmentSlot, budget: CurrencyAmount, league: string) {
+    void budget;
     void league;
     return this.candidates.filter((candidate) => candidate.slot === slot
-      && toChaos(candidate.price) <= toChaos(budget)
       && isManualCandidateCompatible(build, candidate));
   }
 

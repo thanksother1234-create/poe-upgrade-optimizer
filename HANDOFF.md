@@ -12,6 +12,7 @@ Last updated: 2026-07-20
 - The PoE Wiki image failure was caused by its server returning an anti-bot HTML page instead of the requested PNG.
 - Equipped-item detail popovers hide internal `Unique ID` and `ArmourBasePercentile` fields, remove `{crafted}` markup, and group imported stats into cleaner bordered sections.
 - Production PoB comparisons now support a durable Redis-backed asynchronous FIFO queue. Vercel validates the comparison, stores it, and returns a job ID immediately; the Hugging Face engine atomically claims jobs and stores exact PoB metrics; Vercel converts those metrics into the existing ranked result when the browser polls. The default waiting capacity is 100 jobs with one active comparison on CPU Basic.
+- Compatible pasted candidates are always sent to PoB even when their entered listing price exceeds the selected budget. Their comparison card still shows the exact upgrade/downgrade and metric deltas; budget is applied afterward as recommendation eligibility with an explicit over-budget reason. This fixes the misleading `0 checked` result produced by a 10,000-divine candidate under a 5-divine budget.
 - Durable jobs and results expire after 24 hours. A separate expiring lease and heartbeat recover an interrupted running job after a worker restart without allowing two workers to finish the same claim. One unfinished job is allowed per anonymous browser identity.
 - The UI displays live position, total waiting count, running state, and cancellation. It saves the active job ID in browser local storage, resumes polling after a close or reload, and can render completed results without re-importing the build. When Redis is intentionally unconfigured, local development retains the original direct streaming queue.
 - The engine Dockerfile explicitly copies `durable-queue.mjs` beside `server.mjs`. The first deployment attempt omitted that imported module from `/app`, causing an `ERR_MODULE_NOT_FOUND` runtime failure even though the Space repository contained the source file.
@@ -33,7 +34,7 @@ Last updated: 2026-07-20
 
 - Exact PoB 2.65 headless regression: attached Lethal Pride baseline and both supplied replacements reproduced successfully.
 - Engine tests: 20 passed, including durable FIFO claiming, expired-lease recovery, and Docker runtime-module coverage.
-- Application tests: 60 passed, including durable payload compaction, result finalization, and one-active-job enforcement.
+- Application tests: 63 passed, including over-budget direct and durable-queue comparisons, durable payload compaction, result finalization, and one-active-job enforcement.
 - ESLint passed.
 - TypeScript passed.
 - Production build passed (existing Vinext chunk/dynamic-import warnings only).
@@ -43,12 +44,12 @@ Last updated: 2026-07-20
 ## Deployment
 
 - The previously deployed Hugging Face timeless-jewel fix remains live and was confirmed by the user.
-- The durable queue changes are implemented locally but not deployed. They require one Upstash Redis REST database shared by Vercel and Hugging Face, followed by deployment of both hosts.
+- The durable queue is returning hosted comparison jobs. The over-budget comparison fix in this handoff is a Vercel/application-only change and is not yet deployed.
 
 ## Next steps
 
-1. Create the Upstash Redis database and add the documented `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, matching `POB_ASYNC_QUEUE_PREFIX`, and TTL values to both Vercel and Hugging Face. Add `POB_ASYNC_MAX_QUEUED_JOBS=100` to Vercel and keep `POB_ASYNC_WORKER_CONCURRENCY=1` on the CPU Basic Space.
-2. Deploy the Hugging Face engine first, confirm `/health` reports `durableQueue.configured: true` and `running: true`, then deploy Vercel.
+1. Redeploy Vercel, then compare the supplied Pandemonium Spell at 10,000 divine against a 5-divine budget. Confirm the page reports `1 checked`, shows the PoB metric differences, and separately marks it above budget.
+2. Confirm the Hugging Face `/health` response still reports `durableQueue.configured: true` and `running: true`; this fix does not require an engine redeployment.
 3. Submit a production comparison, reload while it is queued, and verify that its position resumes and its final result remains available.
 4. After every code change, update this file with the date, summary, affected files or behavior, verification results, and remaining work.
 
