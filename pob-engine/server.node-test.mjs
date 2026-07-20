@@ -85,6 +85,11 @@ test("cached PoB snapshot mismatches prevent ranking against the wrong baseline"
   assert.match(source, /no candidates were ranked/);
 });
 
+test("Docker image includes every local module imported by the engine entry point", async () => {
+  const dockerfile = await readFile(new URL("./Dockerfile", import.meta.url), "utf8");
+  assert.match(dockerfile, /COPY\s+package\.json\s+server\.mjs\s+durable-queue\.mjs\s+\.\//);
+});
+
 test("worker safely rebinds loaded build sets before calculating", async () => {
   const source = await readFile(new URL("./OptimizerWorker.lua", import.meta.url), "utf8");
   assert.match(source, /POB_SOURCE_PATH[\s\S]*GetScriptPath\(\)/);

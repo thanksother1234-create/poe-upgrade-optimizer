@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { createDurableQueueWorker } from "./durable-queue.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -375,6 +376,7 @@ export function createPobEngineServer({
     concurrency: process.env.POB_JOB_CONCURRENCY,
     maxQueued: process.env.POB_MAX_QUEUED_JOBS,
   }),
+  durableWorker,
 } = {}) {
   return createServer(async (request, response) => {
     const engineVersion = process.env.POB_VERSION ?? "v2.65.0";
@@ -386,6 +388,7 @@ export function createPobEngineServer({
         status: engineToken ? "ready" : "ENGINE_TOKEN secret is not configured",
         endpoints: { health: "GET /health", evaluate: "POST /evaluate" },
         queue: evaluationQueue.status(),
+        durableQueue: durableWorker?.status() ?? { configured: false, running: false },
       });
     }
     if (request.method === "GET" && request.url === "/health") {
@@ -394,6 +397,7 @@ export function createPobEngineServer({
         engineVersion,
         ...(engineToken ? {} : { error: "ENGINE_TOKEN secret is not configured." }),
         queue: evaluationQueue.status(),
+        durableQueue: durableWorker?.status() ?? { configured: false, running: false },
       });
     }
     if (request.method !== "POST" || request.url !== "/evaluate") return json(response, 404, { error: "Not found." });
@@ -431,5 +435,11 @@ export function createPobEngineServer({
 const isEntryPoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntryPoint) {
   const port = Number(process.env.PORT ?? 7860);
-  createPobEngineServer().listen(port, "0.0.0.0", () => console.log(`PoB engine listening on ${port}`));
+  const durableWorker = createDurableQueueWorker({ evaluate: evaluateScenarios });
+  const server = createPobEngineServer({ durableWorker });
+  server.listen(port, "0.0.0.0", async () => {
+    await durableWorker.start();
+    console.log(`PoB engine listening on ${port}${durableWorker.configured ? " with durable queue worker" : ""}`);
+  });
+  server.on("close", () => durableWorker.stop());
 }

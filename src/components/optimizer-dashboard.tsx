@@ -63,6 +63,72 @@ interface ManualCandidate {
   item: TradeItem;
 }
 
+interface OptimizationJobStatus {
+  jobId: string;
+  state: "queued" | "running" | "completed" | "failed" | "cancelled";
+  position: number;
+  queued: number;
+  active: number;
+  league: string;
+  pollAfterMs: number;
+  result?: OptimizationResult;
+  error?: string;
+}
+
+const queueClientKey = "poe-optimizer-queue-client";
+const activeJobKey = "poe-optimizer-active-job";
+
+function queueClientId() {
+  const existing = window.localStorage.getItem(queueClientKey);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  window.localStorage.setItem(queueClientKey, created);
+  return created;
+}
+
+function waitForNextPoll(milliseconds: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Polling was cancelled.", "AbortError"));
+      return;
+    }
+    const abort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("Polling was cancelled.", "AbortError"));
+    };
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function pollOptimizationJob(
+  jobId: string,
+  clientId: string,
+  onStatus: (status: OptimizationJobStatus) => void,
+  signal?: AbortSignal,
+) {
+  while (!signal?.aborted) {
+    const response = await fetch(`/api/optimize/jobs/${encodeURIComponent(jobId)}`, {
+      headers: { "x-poe-client-id": clientId },
+      cache: "no-store",
+      signal,
+    });
+    const status = await response.json() as OptimizationJobStatus & { error?: string };
+    if (!response.ok) throw new Error(status.error ?? "The saved comparison could not be loaded.");
+    onStatus(status);
+    if (status.state === "completed") {
+      if (!status.result) throw new Error("The comparison completed without returning ranked results.");
+      return status;
+    }
+    if (status.state === "failed" || status.state === "cancelled") throw new Error(status.error ?? `The comparison ${status.state}.`);
+    await waitForNextPoll(status.pollAfterMs || 3_000, signal);
+  }
+  throw new DOMException("Polling was cancelled.", "AbortError");
+}
+
 async function copyText(value: string) {
   if (navigator.clipboard && window.isSecureContext) {
     try {
@@ -314,7 +380,8 @@ export default function OptimizerDashboard() {
   const [slots, setSlots] = useState<EquipmentSlot[]>(defaultSlots);
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [queueStatus, setQueueStatus] = useState<{ state: "connecting" | "queued" | "running"; position: number }>({ state: "connecting", position: 0 });
+  const [queueStatus, setQueueStatus] = useState<{ state: "connecting" | "queued" | "running"; position: number; queued: number; active: number }>({ state: "connecting", position: 0, queued: 0, active: 0 });
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
   const [optimizationError, setOptimizationError] = useState("");
@@ -347,6 +414,38 @@ export default function OptimizerDashboard() {
       setLeagues(data.leagues); setCurrentLeague(data.currentLeague); setLeague(data.currentLeague); setLeagueSource(data.source);
     }).catch(() => { if (active) setLeagueSource("fallback"); }).finally(() => { if (active) setLeagueLoading(false); });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const jobId = window.localStorage.getItem(activeJobKey);
+    if (!jobId) return;
+    const controller = new AbortController();
+    const clientId = queueClientId();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setActiveJobId(jobId);
+      setLoading(true);
+      setQueueStatus({ state: "connecting", position: 0, queued: 0, active: 0 });
+    });
+    void pollOptimizationJob(jobId, clientId, (status) => {
+      setLeague(status.league);
+      if (status.state === "queued" || status.state === "running") {
+        setQueueStatus({ state: status.state, position: status.position, queued: status.queued, active: status.active });
+      }
+    }, controller.signal).then((status) => {
+      setResult(status.result ?? null);
+      window.localStorage.removeItem(activeJobKey);
+      setActiveJobId(null);
+      window.setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth" }), 20);
+    }).catch((caught) => {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      window.localStorage.removeItem(activeJobKey);
+      setActiveJobId(null);
+      setOptimizationError(caught instanceof Error ? caught.message : "The saved comparison could not be resumed.");
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
+    return () => controller.abort();
   }, []);
 
   const leagueGroups = useMemo(() => ({ challenge: leagues.filter((item) => !isPermanentLeague(item)).length, permanent: leagues.filter(isPermanentLeague).length }), [leagues]);
@@ -398,10 +497,11 @@ export default function OptimizerDashboard() {
   const run = async () => {
     if (!build?.sourceXml || !slots.length || !candidates.length) return;
     try {
-      setLoading(true); setQueueStatus({ state: "connecting", position: 0 }); setOptimizationError(""); setResult(null);
+      setLoading(true); setQueueStatus({ state: "connecting", position: 0, queued: 0, active: 0 }); setOptimizationError(""); setResult(null);
+      const clientId = queueClientId();
       const response = await fetch("/api/optimize", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-poe-client-id": clientId },
         body: JSON.stringify({
           buildXml: build.sourceXml,
           budget: { amount: budget, currency },
@@ -411,6 +511,27 @@ export default function OptimizerDashboard() {
           candidates: candidates.map((candidate) => ({ slot: candidate.slot, rawText: candidate.rawText, price: candidate.price })),
         }),
       });
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const status = await response.json() as OptimizationJobStatus & { error?: string };
+        if (!response.ok) throw new Error(status.error ?? "The optimizer could not evaluate the pasted candidates.");
+        if (!status.jobId) throw new Error("The durable queue did not return a job ID.");
+        setActiveJobId(status.jobId);
+        window.localStorage.setItem(activeJobKey, status.jobId);
+        if (status.state === "queued" || status.state === "running") {
+          setQueueStatus({ state: status.state, position: status.position, queued: status.queued, active: status.active });
+        }
+        const completed = await pollOptimizationJob(status.jobId, clientId, (update) => {
+          if (update.state === "queued" || update.state === "running") {
+            setQueueStatus({ state: update.state, position: update.position, queued: update.queued, active: update.active });
+          }
+        });
+        setResult(completed.result ?? null);
+        window.localStorage.removeItem(activeJobKey);
+        setActiveJobId(null);
+        window.setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth" }), 20);
+        return;
+      }
       if (!response.ok) {
         const payload = await response.json() as { error?: string };
         throw new Error(payload.error ?? "The optimizer could not evaluate the pasted candidates.");
@@ -429,7 +550,7 @@ export default function OptimizerDashboard() {
           result?: OptimizationResult;
           error?: string;
         };
-        if (message.type === "queue" && message.state) setQueueStatus({ state: message.state, position: Number(message.position) || 0 });
+        if (message.type === "queue" && message.state) setQueueStatus({ state: message.state, position: Number(message.position) || 0, queued: 0, active: 0 });
         if (message.type === "error") throw new Error(message.error ?? "The optimizer could not evaluate the pasted candidates.");
         if (message.type === "result" && message.result) { setResult(message.result); completed = true; }
       };
@@ -448,6 +569,23 @@ export default function OptimizerDashboard() {
       setOptimizationError(caught instanceof Error ? caught.message : "The optimizer could not evaluate the pasted candidates.");
     } finally {
       setLoading(false);
+    }
+  };
+  const cancelActiveJob = async () => {
+    if (!activeJobId) return;
+    try {
+      const response = await fetch(`/api/optimize/jobs/${encodeURIComponent(activeJobId)}`, {
+        method: "DELETE",
+        headers: { "x-poe-client-id": queueClientId() },
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "The comparison could not be cancelled.");
+      window.localStorage.removeItem(activeJobKey);
+      setActiveJobId(null);
+      setLoading(false);
+      setOptimizationError("The queued comparison was cancelled.");
+    } catch (caught) {
+      setOptimizationError(caught instanceof Error ? caught.message : "The comparison could not be cancelled.");
     }
   };
   const toggleSlot = (slot: EquipmentSlot) => {
@@ -581,6 +719,8 @@ export default function OptimizerDashboard() {
     </section>
 
     <section className="mx-auto max-w-7xl space-y-4 px-4 pb-12 sm:px-6">
+      {loading && !build && <Card className="border-sky-400/25 bg-sky-400/[0.06]"><CardContent className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium text-sky-200">{queueStatus.state === "queued" ? `Your saved comparison is number ${queueStatus.position} in line` : queueStatus.state === "running" ? "Your saved comparison is running now" : "Reconnecting to your saved comparison"}</p><p className="mt-1 text-xs text-muted-foreground">You can close this page. This browser will reconnect to job {activeJobId?.slice(0, 8)} when you return.</p></div>{activeJobId && <Button variant="outline" size="sm" onClick={() => void cancelActiveJob()}><Trash2 />Cancel</Button>}</CardContent></Card>}
+      {optimizationError && !build && <Alert variant="destructive"><AlertTitle>Saved comparison needs attention</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
       <Card className="border-white/[0.07] bg-card/90 shadow-[0_28px_70px_-52px_rgba(0,0,0,0.95)]">
         <CardHeader className="flex flex-col gap-5 border-b border-border/70 sm:flex-row sm:items-center sm:justify-between"><SectionHeading number="1" eyebrow="Import" title="Start with your build" icon={Import} />{build && <Badge className="gap-1 bg-emerald-500/15 text-emerald-300"><CheckCircle2 className="size-3" />Build ready</Badge>}</CardHeader>
         <CardContent className="grid min-w-0 gap-6 pt-6 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -676,7 +816,7 @@ export default function OptimizerDashboard() {
               <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-xl font-semibold">Compare them with your build</h3><p className="mt-1 text-sm text-muted-foreground">Path of Building will equip each item and show you what genuinely changes.</p></div><Badge variant="secondary">{candidates.length} ready</Badge></div>
               {candidates.length > 0 ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{candidates.map((candidate) => <Card key={candidate.id} className="gap-3 border-border/70 bg-background/35 p-4 shadow-none"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-medium text-primary">{slotLabels[candidate.slot]}</p><p className="mt-1 truncate font-heading text-base font-semibold text-amber-100">{candidate.item.name}</p><p className="truncate text-[11px] text-muted-foreground">{candidate.item.baseType}</p></div><Button variant="ghost" size="icon-sm" onClick={() => removeCandidate(candidate.id)} aria-label={`Remove ${candidate.item.name}`}><Trash2 /></Button></div><div className="flex items-center justify-between border-t border-border/60 pt-3"><span className="text-xs text-muted-foreground">{candidate.item.modifiers.length} parsed stats</span><Badge>{candidate.price.amount} {candidate.price.currency === "divine" ? "div" : "chaos"}</Badge></div></Card>)}</div> : <Alert className="border-dashed"><PackageSearch /><AlertTitle>Your shortlist is empty</AlertTitle><AlertDescription>Find a few compatible items on the official trade site, then paste each one above.</AlertDescription></Alert>}
               <Button size="lg" className="w-full shadow-lg shadow-primary/10" onClick={run} disabled={loading || !candidates.length}>{loading ? <Loader2 className="animate-spin" /> : <DatabaseZap />}{loading ? queueStatus.state === "queued" ? `Waiting in PoB queue · position ${queueStatus.position}` : queueStatus.state === "running" ? "PoB is checking your items..." : "Joining the PoB queue..." : `Compare ${candidates.length || ""} candidate${candidates.length === 1 ? "" : "s"}`}<ArrowRight /></Button>
-              {loading && <div className="rounded-xl border border-sky-400/20 bg-sky-400/5 px-4 py-3 text-center"><p className="text-xs font-medium text-sky-200">{queueStatus.state === "queued" ? `You are number ${queueStatus.position} in the queue` : queueStatus.state === "running" ? "Your comparison is running now" : "Connecting to the comparison service"}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">Comparisons run in order with limited concurrency to keep the Path of Building service responsive.</p></div>}
+              {loading && <div className="rounded-xl border border-sky-400/20 bg-sky-400/5 px-4 py-3 text-center"><p className="text-xs font-medium text-sky-200">{queueStatus.state === "queued" ? `You are number ${queueStatus.position} in the queue` : queueStatus.state === "running" ? "Your comparison is running now" : "Connecting to the comparison service"}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{activeJobId ? `Your place is saved, so you can close this page and return later.${queueStatus.queued > 0 ? ` ${queueStatus.queued} comparison${queueStatus.queued === 1 ? " is" : "s are"} waiting.` : ""}` : "Comparisons run in order with limited concurrency to keep the Path of Building service responsive."}</p>{activeJobId && <Button variant="ghost" size="sm" className="mt-2" onClick={() => void cancelActiveJob()}><Trash2 />Cancel comparison</Button>}</div>}
               {optimizationError && <Alert variant="destructive"><AlertTitle>Optimization failed</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
             </div>
           </CardContent>
@@ -684,7 +824,7 @@ export default function OptimizerDashboard() {
       </>}
     </section>
 
-    {result && build && <section id="results" className="mx-auto max-w-7xl space-y-5 px-4 py-16 sm:px-6">
+    {result && <section id="results" className="mx-auto max-w-7xl space-y-5 px-4 py-16 sm:px-6">
       <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between"><div><Badge variant="outline" className="mb-3 gap-1 text-emerald-300"><CheckCircle2 className="size-3" />Verified by Path of Building · {result.evaluatedCandidates} checked</Badge><h2 className="font-heading text-4xl font-semibold">Here&apos;s what PoB calculated</h2><p className="mt-2 text-sm text-muted-foreground">Calculated by {result.engineVersion ?? "Path of Building"} using {dpsMetricLabel(result.dpsMetric)}. Upgrade verdicts and recommendation eligibility are shown separately.</p></div><div className="flex gap-2"><Badge variant="secondary" className="px-3 py-1.5">{league}</Badge><Badge className="px-3 py-1.5">Budget {formatPrice(result.budgetInChaos)}</Badge></div></div>
       {result.combinations[0] && <Card className="overflow-hidden border-primary/35 bg-gradient-to-br from-primary/10 via-card to-card shadow-[0_24px_65px_-48px_rgba(232,169,70,0.5)]"><CardHeader className="border-b border-primary/15"><Badge className="mb-2 w-fit gap-1"><Sparkles className="size-3" />Best combination</Badge><CardTitle className="font-heading text-2xl">{result.combinations[0].recommendations.map((item) => item.item.name).join(" + ")}</CardTitle><CardDescription>{result.combinations[0].explanation}</CardDescription></CardHeader><CardContent className="grid gap-4 pt-6 sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">Total cost</p><p className="mt-1 font-mono text-xl font-semibold">{formatPrice(result.combinations[0].priceInChaos)}</p></div><div><p className="text-xs text-muted-foreground">Damage change</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.totalDps, result.combinations[0].changes.totalDps)} /></p></div><div><p className="text-xs text-muted-foreground">EHP change</p><p className="mt-1 text-xl"><Delta value={percentChange(result.baselineMetrics.effectiveHitPool, result.combinations[0].changes.effectiveHitPool)} /></p></div></CardContent></Card>}
       <div className="flex items-center justify-between pt-6"><div><p className="text-xs font-medium text-primary">Top picks</p><h3 className="font-heading text-2xl font-semibold">Best individual upgrades</h3></div><Badge variant="outline">{result.recommendations.length} selected</Badge></div>

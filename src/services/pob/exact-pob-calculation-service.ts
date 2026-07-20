@@ -8,7 +8,7 @@ interface EngineScenarioResult {
   error?: unknown;
 }
 
-interface EngineResponse {
+export interface PobEngineResponse {
   type?: unknown;
   position?: unknown;
   queued?: unknown;
@@ -19,6 +19,13 @@ interface EngineResponse {
   baseline?: unknown;
   results?: unknown;
   error?: unknown;
+}
+
+export interface PobEngineEvaluationRequest {
+  buildXml: string;
+  scenarios: { id: string; replacements: { slot: EquipmentSlot; rawText: string }[] }[];
+  expectedBaseline: BuildMetrics;
+  expectedDpsMetric?: DpsMetric;
 }
 
 const dpsMetrics = new Set<DpsMetric>(["FullDPS", "CombinedDPS", "MinionCombinedDPS", "TotalDPS"]);
@@ -58,6 +65,58 @@ function replacementSlots(build: Build, slot: EquipmentSlot): EquipmentSlot[] {
   return [slot];
 }
 
+export function createPobEngineEvaluationRequest(build: Build, items: TradeItem[]): PobEngineEvaluationRequest {
+  if (!build.sourceXml) throw new PobEngineError("Re-import this build before optimizing so its full Path of Building data is available.", 400);
+  return {
+    buildXml: build.sourceXml,
+    scenarios: items.map((item, index) => {
+      if (!item.rawText) throw new PobEngineError(`The candidate ${item.name} did not include copied Path of Building item text.`);
+      return {
+        id: `${index}:${item.slot}:${item.id}`,
+        replacements: replacementSlots(build, item.slot).map((slot) => ({ slot, rawText: item.rawText! })),
+      };
+    }),
+    expectedBaseline: build.metrics,
+    expectedDpsMetric: build.dpsMetric,
+  };
+}
+
+export function createPobBatchSimulationResult(
+  items: TradeItem[],
+  payload: PobEngineResponse,
+): PobBatchSimulationResult {
+  const baseline = parseMetrics(payload.baseline);
+  const results = Array.isArray(payload.results) ? payload.results as EngineScenarioResult[] : [];
+  const byId = new Map(results.map((result) => {
+    if (typeof result.id !== "string") throw new PobEngineError("The Path of Building engine returned an unidentified scenario.");
+    return [result.id, result] as const;
+  }));
+  const simulations = items.map((item, index) => {
+    const id = `${index}:${item.slot}:${item.id}`;
+    const result = byId.get(id);
+    if (!result) throw new PobEngineError(`The Path of Building engine skipped ${item.name}.`);
+    if (typeof result.error === "string") throw new PobEngineError(`Path of Building could not evaluate ${item.name}: ${result.error}`);
+    const metrics = parseMetrics(result.metrics);
+    return {
+      slot: item.slot,
+      item: publicTradeItem(item),
+      metrics,
+      changes: subtractMetrics(metrics, baseline),
+      verification: "pob" as const,
+    };
+  });
+  const dpsMetric = typeof payload.dpsMetric === "string" && dpsMetrics.has(payload.dpsMetric as DpsMetric)
+    ? payload.dpsMetric as DpsMetric
+    : "CombinedDPS";
+  return {
+    baseline,
+    simulations,
+    verification: "pob",
+    engineVersion: typeof payload.engineVersion === "string" ? payload.engineVersion : "Path of Building",
+    dpsMetric,
+  };
+}
+
 export class ExactPobCalculationService implements PobCalculationService {
   private readonly importer = new MvpPobCalculationService();
 
@@ -72,7 +131,7 @@ export class ExactPobCalculationService implements PobCalculationService {
   }
 
   async calculateBuild(build: Build): Promise<BuildMetrics> {
-    return (await this.evaluate(build, [])).baseline;
+    return parseMetrics((await this.evaluate(createPobEngineEvaluationRequest(build, []))).baseline);
   }
 
   async simulateItemReplacement(build: Build, slot: EquipmentSlot, item: TradeItem): Promise<SimulationResult> {
@@ -83,44 +142,15 @@ export class ExactPobCalculationService implements PobCalculationService {
   }
 
   async simulateItemReplacements(build: Build, items: TradeItem[]): Promise<PobBatchSimulationResult> {
-    const scenarios = items.map((item, index) => {
-      if (!item.rawText) throw new PobEngineError(`The candidate ${item.name} did not include copied Path of Building item text.`);
-      return {
-        id: `${index}:${item.slot}:${item.id}`,
-        replacements: replacementSlots(build, item.slot).map((slot) => ({ slot, rawText: item.rawText! })),
-      };
-    });
-    const response = await this.evaluate(build, scenarios);
-    const byId = new Map(response.results.map((result) => [result.id, result]));
-    const simulations = items.map((item, index) => {
-      const id = `${index}:${item.slot}:${item.id}`;
-      const result = byId.get(id);
-      if (!result) throw new PobEngineError(`The Path of Building engine skipped ${item.name}.`);
-      if (typeof result.error === "string") throw new PobEngineError(`Path of Building could not evaluate ${item.name}: ${result.error}`);
-      const metrics = parseMetrics(result.metrics);
-      return {
-        slot: item.slot,
-        item: publicTradeItem(item),
-        metrics,
-        changes: subtractMetrics(metrics, response.baseline),
-        verification: "pob" as const,
-      };
-    });
-    return {
-      baseline: response.baseline,
-      simulations,
-      verification: "pob",
-      engineVersion: response.engineVersion,
-      dpsMetric: response.dpsMetric,
-    };
+    const request = createPobEngineEvaluationRequest(build, items);
+    const response = await this.evaluate(request);
+    return createPobBatchSimulationResult(items, response);
   }
 
-  private async evaluate(build: Build, scenarios: { id: string; replacements: { slot: EquipmentSlot; rawText: string }[] }[]) {
+  private async evaluate(request: PobEngineEvaluationRequest): Promise<PobEngineResponse> {
     if (!this.engineUrl) {
       throw new PobEngineError("Exact Path of Building calculations are not configured. Deploy the included pob-engine service and set POB_ENGINE_URL in Vercel.", 503);
     }
-    if (!build.sourceXml) throw new PobEngineError("Re-import this build before optimizing so its full Path of Building data is available.", 400);
-
     const baseUrl = this.engineUrl.endsWith("/") ? this.engineUrl : `${this.engineUrl}/`;
     const headers: Record<string, string> = { Accept: "application/x-ndjson", "Content-Type": "application/json" };
     if (this.engineToken) headers.Authorization = `Bearer ${this.engineToken}`;
@@ -130,12 +160,7 @@ export class ExactPobCalculationService implements PobCalculationService {
       response = await fetch(new URL("evaluate", baseUrl), {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          buildXml: build.sourceXml,
-          scenarios,
-          expectedBaseline: build.metrics,
-          expectedDpsMetric: build.dpsMetric,
-        }),
+        body: JSON.stringify(request),
         cache: "no-store",
         signal: AbortSignal.timeout(290_000),
       });
@@ -147,17 +172,17 @@ export class ExactPobCalculationService implements PobCalculationService {
     }
 
     if (!response.ok) {
-      const payload = await response.json().catch(() => ({})) as EngineResponse;
+      const payload = await response.json().catch(() => ({})) as PobEngineResponse;
       throw new PobEngineError(typeof payload.error === "string" ? payload.error : `Path of Building engine returned ${response.status}.`, response.status);
     }
     const reader = response.body?.getReader();
     if (!reader) throw new PobEngineError("The Path of Building engine returned an empty response.");
     const decoder = new TextDecoder();
     let buffer = "";
-    let payload: EngineResponse | undefined;
+    let payload: PobEngineResponse | undefined;
     const handleLine = (line: string) => {
       if (!line.trim()) return;
-      const message = JSON.parse(line) as EngineResponse;
+      const message = JSON.parse(line) as PobEngineResponse;
       if (message.type === "queued" || message.type === "running") {
         this.onQueueUpdate?.({
           state: message.type,
@@ -179,20 +204,6 @@ export class ExactPobCalculationService implements PobCalculationService {
     }
     handleLine(buffer);
     if (!payload) throw new PobEngineError("The Path of Building engine ended before returning a result.");
-    const baseline = parseMetrics(payload.baseline);
-    const results = Array.isArray(payload.results) ? payload.results as EngineScenarioResult[] : [];
-    const parsedResults = results.map((result) => {
-      if (typeof result.id !== "string") throw new PobEngineError("The Path of Building engine returned an unidentified scenario.");
-      return { id: result.id, metrics: result.metrics, error: typeof result.error === "string" ? result.error : undefined };
-    });
-    const dpsMetric = typeof payload.dpsMetric === "string" && dpsMetrics.has(payload.dpsMetric as DpsMetric)
-      ? payload.dpsMetric as DpsMetric
-      : "CombinedDPS";
-    return {
-      baseline,
-      results: parsedResults,
-      engineVersion: typeof payload.engineVersion === "string" ? payload.engineVersion : "Path of Building",
-      dpsMetric,
-    };
+    return payload;
   }
 }
