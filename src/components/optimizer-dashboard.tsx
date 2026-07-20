@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowRight, Calculator, Check, CheckCircle2, CircleDollarSign, ClipboardPaste, Copy, DatabaseZap, Gauge,
   ExternalLink, HeartPulse, Import, Loader2, LockKeyhole, PackageSearch, Scale, Search, Shield,
@@ -71,8 +71,27 @@ interface OptimizationJobStatus {
   active: number;
   league: string;
   pollAfterMs: number;
+  createdAt?: string;
+  startedAt?: string;
+  completedAt?: string;
   result?: OptimizationResult;
   error?: string;
+}
+
+interface QueueDisplayStatus {
+  state: "connecting" | "queued" | "running";
+  position: number;
+  queued: number;
+  active: number;
+  startedAt?: string;
+}
+
+interface QueueStatusUpdate {
+  state: "queued" | "running";
+  position?: number;
+  queued?: number;
+  active?: number;
+  startedAt?: string;
 }
 
 const queueClientKey = "poe-optimizer-queue-client";
@@ -380,7 +399,8 @@ export default function OptimizerDashboard() {
   const [slots, setSlots] = useState<EquipmentSlot[]>(defaultSlots);
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [queueStatus, setQueueStatus] = useState<{ state: "connecting" | "queued" | "running"; position: number; queued: number; active: number }>({ state: "connecting", position: 0, queued: 0, active: 0 });
+  const [queueStatus, setQueueStatus] = useState<QueueDisplayStatus>({ state: "connecting", position: 0, queued: 0, active: 0 });
+  const [processingClock, setProcessingClock] = useState(() => Date.now());
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
@@ -401,6 +421,30 @@ export default function OptimizerDashboard() {
   const [pobCalculatedWeights, setPobCalculatedWeights] = useState<Partial<Record<EquipmentSlot, PobCalculatedWeightResult>>>({});
   const [calculatingWeightSlot, setCalculatingWeightSlot] = useState<EquipmentSlot | null>(null);
   const [weightedCustomizations, setWeightedCustomizations] = useState<Partial<Record<EquipmentSlot, WeightedTradeSearchCustomization>>>({});
+
+  const applyQueueStatus = useCallback((status: QueueStatusUpdate) => {
+    setProcessingClock(Date.now());
+    setQueueStatus((current) => ({
+      state: status.state,
+      position: Number(status.position) || 0,
+      queued: Number(status.queued) || 0,
+      active: Number(status.active) || 0,
+      startedAt: status.state === "running"
+        ? status.startedAt ?? (current.state === "running" ? current.startedAt : undefined) ?? new Date().toISOString()
+        : undefined,
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (queueStatus.state !== "running") return;
+    const timer = window.setInterval(() => setProcessingClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [queueStatus.state]);
+
+  const processingStartedAt = Date.parse(queueStatus.startedAt ?? "");
+  const processingSeconds = queueStatus.state === "running" && Number.isFinite(processingStartedAt)
+    ? Math.max(0, Math.floor((processingClock - processingStartedAt) / 1_000))
+    : 0;
 
   useEffect(() => {
     let active = true;
@@ -428,7 +472,7 @@ export default function OptimizerDashboard() {
     void pollOptimizationJob(jobId, clientId, (status) => {
       setLeague(status.league);
       if (status.state === "queued" || status.state === "running") {
-        setQueueStatus({ state: status.state, position: status.position, queued: status.queued, active: status.active });
+        applyQueueStatus({ state: status.state, position: status.position, queued: status.queued, active: status.active, startedAt: status.startedAt });
       }
     }, controller.signal).then((status) => {
       setResult(status.result ?? null);
@@ -444,7 +488,7 @@ export default function OptimizerDashboard() {
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, []);
+  }, [applyQueueStatus]);
 
   const leagueGroups = useMemo(() => ({ challenge: leagues.filter((item) => !isPermanentLeague(item)).length, permanent: leagues.filter(isPermanentLeague).length }), [leagues]);
   const baseWeightedSearches = useMemo<Partial<Record<EquipmentSlot, WeightedTradeSearchDraft>>>(() => {
@@ -516,11 +560,11 @@ export default function OptimizerDashboard() {
         setActiveJobId(status.jobId);
         window.localStorage.setItem(activeJobKey, status.jobId);
         if (status.state === "queued" || status.state === "running") {
-          setQueueStatus({ state: status.state, position: status.position, queued: status.queued, active: status.active });
+          applyQueueStatus({ state: status.state, position: status.position, queued: status.queued, active: status.active, startedAt: status.startedAt });
         }
         const completed = await pollOptimizationJob(status.jobId, clientId, (update) => {
           if (update.state === "queued" || update.state === "running") {
-            setQueueStatus({ state: update.state, position: update.position, queued: update.queued, active: update.active });
+            applyQueueStatus({ state: update.state, position: update.position, queued: update.queued, active: update.active, startedAt: update.startedAt });
           }
         });
         setResult(completed.result ?? null);
@@ -544,10 +588,11 @@ export default function OptimizerDashboard() {
           type?: string;
           state?: "queued" | "running";
           position?: number;
+          startedAt?: string;
           result?: OptimizationResult;
           error?: string;
         };
-        if (message.type === "queue" && message.state) setQueueStatus({ state: message.state, position: Number(message.position) || 0, queued: 0, active: 0 });
+        if (message.type === "queue" && message.state) applyQueueStatus({ state: message.state, position: message.position, startedAt: message.startedAt });
         if (message.type === "error") throw new Error(message.error ?? "The optimizer could not evaluate the pasted candidates.");
         if (message.type === "result" && message.result) { setResult(message.result); completed = true; }
       };
@@ -716,7 +761,7 @@ export default function OptimizerDashboard() {
     </section>
 
     <section className="mx-auto max-w-7xl space-y-4 px-4 pb-12 sm:px-6">
-      {loading && !build && <Card className="border-sky-400/25 bg-sky-400/[0.06]"><CardContent className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium text-sky-200">{queueStatus.state === "queued" ? `Your saved comparison is number ${queueStatus.position} in line` : queueStatus.state === "running" ? "Your saved comparison is running now" : "Reconnecting to your saved comparison"}</p><p className="mt-1 text-xs text-muted-foreground">You can close this page. This browser will reconnect to job {activeJobId?.slice(0, 8)} when you return.</p></div>{activeJobId && <Button variant="outline" size="sm" onClick={() => void cancelActiveJob()}><Trash2 />Cancel</Button>}</CardContent></Card>}
+      {loading && !build && <Card className="border-sky-400/25 bg-sky-400/[0.06]"><CardContent className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium text-sky-200">{queueStatus.state === "queued" ? `Your saved comparison is number ${queueStatus.position} in line` : queueStatus.state === "running" ? `Your saved comparison is running · ${processingSeconds} seconds` : "Reconnecting to your saved comparison"}</p><p className="mt-1 text-xs text-muted-foreground">You can close this page. This browser will reconnect to job {activeJobId?.slice(0, 8)} when you return.</p></div>{activeJobId && <Button variant="outline" size="sm" onClick={() => void cancelActiveJob()}><Trash2 />Cancel</Button>}</CardContent></Card>}
       {optimizationError && !build && <Alert variant="destructive"><AlertTitle>Saved comparison needs attention</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
       <Card className="border-white/[0.07] bg-card/90 shadow-[0_28px_70px_-52px_rgba(0,0,0,0.95)]">
         <CardHeader className="flex flex-col gap-5 border-b border-border/70 sm:flex-row sm:items-center sm:justify-between"><SectionHeading number="1" eyebrow="Import" title="Start with your build" icon={Import} />{build && <Badge className="gap-1 bg-emerald-500/15 text-emerald-300"><CheckCircle2 className="size-3" />Build ready</Badge>}</CardHeader>
@@ -809,8 +854,8 @@ export default function OptimizerDashboard() {
             <div className="space-y-4 border-t border-border pt-6 lg:col-span-2">
               <div className="flex items-center justify-between gap-3"><div><h3 className="font-heading text-xl font-semibold">Compare them with your build</h3><p className="mt-1 text-sm text-muted-foreground">Path of Building will equip each item and show you what genuinely changes.</p></div><Badge variant="secondary">{candidates.length} ready</Badge></div>
               {candidates.length > 0 ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{candidates.map((candidate) => <Card key={candidate.id} className="gap-3 border-border/70 bg-background/35 p-4 shadow-none"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-medium text-primary">{slotLabels[candidate.slot]}</p><p className="mt-1 truncate font-heading text-base font-semibold text-amber-100">{candidate.item.name}</p><p className="truncate text-[11px] text-muted-foreground">{candidate.item.baseType}</p></div><Button variant="ghost" size="icon-sm" onClick={() => removeCandidate(candidate.id)} aria-label={`Remove ${candidate.item.name}`}><Trash2 /></Button></div><div className="flex items-center justify-between border-t border-border/60 pt-3"><span className="text-xs text-muted-foreground">{candidate.item.modifiers.length} parsed stats</span><Badge variant={candidate.price.amount > 0 ? "default" : "secondary"}>{candidate.price.amount > 0 ? `${candidate.price.amount} ${candidate.price.currency === "divine" ? "div" : candidate.price.currency}` : "Price not included"}</Badge></div></Card>)}</div> : <Alert className="border-dashed"><PackageSearch /><AlertTitle>Your shortlist is empty</AlertTitle><AlertDescription>Find a few compatible items on the official trade site, then paste each one above.</AlertDescription></Alert>}
-              <Button size="lg" className="w-full shadow-lg shadow-primary/10" onClick={run} disabled={loading || !candidates.length}>{loading ? <Loader2 className="animate-spin" /> : <DatabaseZap />}{loading ? queueStatus.state === "queued" ? `Waiting in PoB queue · position ${queueStatus.position}` : queueStatus.state === "running" ? "PoB is checking your items..." : "Joining the PoB queue..." : `Compare ${candidates.length || ""} candidate${candidates.length === 1 ? "" : "s"}`}<ArrowRight /></Button>
-              {loading && <div className="rounded-xl border border-sky-400/20 bg-sky-400/5 px-4 py-3 text-center"><p className="text-xs font-medium text-sky-200">{queueStatus.state === "queued" ? `You are number ${queueStatus.position} in the queue` : queueStatus.state === "running" ? "Your comparison is running now" : "Connecting to the comparison service"}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{activeJobId ? `Your place is saved, so you can close this page and return later.${queueStatus.queued > 0 ? ` ${queueStatus.queued} comparison${queueStatus.queued === 1 ? " is" : "s are"} waiting.` : ""}` : "Comparisons run in order with limited concurrency to keep the Path of Building service responsive."}</p>{activeJobId && <Button variant="ghost" size="sm" className="mt-2" onClick={() => void cancelActiveJob()}><Trash2 />Cancel comparison</Button>}</div>}
+              <Button size="lg" className="w-full shadow-lg shadow-primary/10" onClick={run} disabled={loading || !candidates.length}>{loading ? <Loader2 className="animate-spin" /> : <DatabaseZap />}{loading ? queueStatus.state === "queued" ? `Waiting in PoB queue · position ${queueStatus.position}` : queueStatus.state === "running" ? `PoB is checking your items · ${processingSeconds}s` : "Joining the PoB queue..." : `Compare ${candidates.length || ""} candidate${candidates.length === 1 ? "" : "s"}`}<ArrowRight /></Button>
+              {loading && <div className="rounded-xl border border-sky-400/20 bg-sky-400/5 px-4 py-3 text-center"><p className="text-xs font-medium text-sky-200">{queueStatus.state === "queued" ? `You are number ${queueStatus.position} in the queue` : queueStatus.state === "running" ? `Processing for ${processingSeconds} second${processingSeconds === 1 ? "" : "s"}` : "Connecting to the comparison service"}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{activeJobId ? `Your place is saved, so you can close this page and return later.${queueStatus.queued > 0 ? ` ${queueStatus.queued} comparison${queueStatus.queued === 1 ? " is" : "s are"} waiting.` : ""}` : "Comparisons run in order with limited concurrency to keep the Path of Building service responsive."}</p>{activeJobId && <Button variant="ghost" size="sm" className="mt-2" onClick={() => void cancelActiveJob()}><Trash2 />Cancel comparison</Button>}</div>}
               {optimizationError && <Alert variant="destructive"><AlertTitle>Optimization failed</AlertTitle><AlertDescription>{optimizationError}</AlertDescription></Alert>}
             </div>
           </CardContent>

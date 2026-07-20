@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createDurableQueueWorker } from "./durable-queue.mjs";
 
+const silentLogger = { info() {}, warn() {}, error() {} };
+
 class MemoryRedis {
   configured = true;
   values = new Map();
@@ -73,6 +75,7 @@ function queuedJob(id, clientId = `client-${id}`) {
 test("durable worker claims queued jobs in FIFO order and persists completed metrics", async () => {
   const redis = new MemoryRedis();
   const order = [];
+  const logs = [];
   for (const id of ["first", "second"]) {
     const job = queuedJob(id);
     redis.values.set(`test:job:${id}`, JSON.stringify(job));
@@ -83,6 +86,11 @@ test("durable worker claims queued jobs in FIFO order and persists completed met
     redis,
     prefix: "test",
     workerId: "worker-1",
+    logger: {
+      info: (line) => logs.push(JSON.parse(line)),
+      warn: (line) => logs.push(JSON.parse(line)),
+      error: (line) => logs.push(JSON.parse(line)),
+    },
     evaluate: async ({ buildXml }) => {
       const id = buildXml.match(/id="([^"]+)/)?.[1];
       order.push(id);
@@ -99,6 +107,10 @@ test("durable worker claims queued jobs in FIFO order and persists completed met
   assert.equal(completed.payload.engineRequest, undefined);
   assert.deepEqual(redis.list("test:processing"), []);
   assert.equal(redis.values.has("test:client:client-second"), false);
+  assert.equal(logs.filter((entry) => entry.event === "job_started").length, 2);
+  const completion = logs.find((entry) => entry.event === "job_completed" && entry.jobId === "second");
+  assert.equal(typeof completion.processingMs, "number");
+  assert.equal(completion.persisted, true);
 });
 
 test("durable worker returns an expired in-flight job to the front of the queue", async () => {
@@ -115,6 +127,7 @@ test("durable worker returns an expired in-flight job to the front of the queue"
     redis,
     prefix: "test",
     workerId: "replacement-worker",
+    logger: silentLogger,
     evaluate: async () => ({ baseline: { totalDps: 1 }, dpsMetric: "CombinedDPS", results: [] }),
   });
 
@@ -123,4 +136,31 @@ test("durable worker returns an expired in-flight job to the front of the queue"
   assert.deepEqual(redis.list("test:processing"), []);
   assert.equal(await worker.runOnce(), true);
   assert.equal(JSON.parse(redis.values.get("test:job:expired")).state, "completed");
+});
+
+test("durable worker logs failed evaluations with their elapsed processing time", async () => {
+  const redis = new MemoryRedis();
+  const job = queuedJob("failure");
+  const logs = [];
+  redis.values.set("test:job:failure", JSON.stringify(job));
+  redis.values.set(`test:client:${job.clientId}`, job.id);
+  await redis.command("LPUSH", "test:waiting", job.id);
+  const worker = createDurableQueueWorker({
+    redis,
+    prefix: "test",
+    workerId: "worker-failure",
+    logger: {
+      info: (line) => logs.push(JSON.parse(line)),
+      warn: (line) => logs.push(JSON.parse(line)),
+      error: (line) => logs.push(JSON.parse(line)),
+    },
+    evaluate: async () => { throw new Error("calculation exploded"); },
+  });
+
+  assert.equal(await worker.runOnce(), true);
+  assert.equal(JSON.parse(redis.values.get("test:job:failure")).state, "failed");
+  const failure = logs.find((entry) => entry.event === "job_failed");
+  assert.equal(failure.error, "calculation exploded");
+  assert.equal(typeof failure.processingMs, "number");
+  assert.equal(failure.persisted, true);
 });
