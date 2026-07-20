@@ -3,6 +3,7 @@ import { CurrencyAmount, EQUIPMENT_SLOTS, EquipmentSlot, OptimizationGoal } from
 import { UpgradeOptimizer } from "@/services/optimizer/upgrade-optimizer";
 import { ExactPobCalculationService, PobEngineError } from "@/services/pob/exact-pob-calculation-service";
 import { parsePobXml } from "@/services/pob/pob-build-parser";
+import { createDurableOptimizationPayload, OptimizationJobService, validOptimizationClientId } from "@/services/queue/optimization-job-service";
 import { isManualCandidateCompatible, ManualTradeMarketService, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
 
 export const maxDuration = 300;
@@ -82,6 +83,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return NextResponse.json({ error: "The optimizer could not complete the live Path of Building evaluation." }, { status: 500 });
+  }
+
+  const jobService = new OptimizationJobService();
+  if (jobService.configured) {
+    const clientId = request.headers.get("x-poe-client-id");
+    if (!validOptimizationClientId(clientId)) {
+      return NextResponse.json({ error: "A valid browser queue identity is required. Refresh the page and try again." }, { status: 400 });
+    }
+    try {
+      const payload = createDurableOptimizationPayload(input);
+      const { job, reused } = await jobService.enqueue(payload, clientId);
+      return NextResponse.json({
+        mode: "async",
+        reused,
+        ...await jobService.publicStatus(job),
+      }, {
+        status: 202,
+        headers: { "Cache-Control": "no-store" },
+      });
+    } catch (error) {
+      const status = Number.isInteger((error as { status?: unknown })?.status) ? Number((error as { status: number }).status) : 503;
+      return NextResponse.json({
+        error: error instanceof Error ? error.message : "The durable optimization queue is unavailable.",
+      }, { status });
+    }
   }
 
   const encoder = new TextEncoder();
