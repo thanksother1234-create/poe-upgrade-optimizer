@@ -109,6 +109,43 @@ it("stores the full PoB request only for the worker and finalizes its metrics in
   expect(result.candidateEvaluations[0].changes.totalDps).toBe(100_000);
 });
 
+it("finalizes an over-budget queue result as checked but recommendation-ineligible", async () => {
+  const build = { ...structuredClone(mockBuild), sourceXml: "<PathOfBuilding></PathOfBuilding>" };
+  const item = { ...candidate(), price: { amount: 10_000, currency: "divine" as const } };
+  const payload = createDurableOptimizationPayload({
+    build,
+    budget: { amount: 5, currency: "divine" },
+    goal: "dps",
+    allowedSlots: ["ring1"],
+    league: "Mirage",
+    candidates: [item],
+  });
+  const job: DurableOptimizationJob = {
+    version: 1,
+    id: "00000000-0000-4000-8000-000000000001",
+    clientId: "browser-client-0001",
+    state: "completed",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    payload,
+    engineResult: {
+      engineVersion: "v2.65.0",
+      dpsMetric: "CombinedDPS",
+      baseline: build.metrics,
+      results: [{
+        id: "0:ring1:candidate",
+        metrics: { ...build.metrics, totalDps: build.metrics.totalDps + 100_000 },
+      }],
+    },
+  };
+
+  const result = await finalizeOptimizationJob(job);
+  expect(result.evaluatedCandidates).toBe(1);
+  expect(result.candidateEvaluations[0]).toMatchObject({ verdict: "upgrade", qualified: false });
+  expect(result.candidateEvaluations[0].rejectionReasons.join(" ")).toMatch(/above your 5 divine budget/i);
+  expect(result.recommendations).toHaveLength(0);
+});
+
 describe("OptimizationJobService", () => {
   it("returns the same unfinished job for a second submission from one browser", async () => {
     vi.stubEnv("POB_ASYNC_QUEUE_PREFIX", "test");

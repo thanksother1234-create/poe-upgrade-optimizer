@@ -3,6 +3,7 @@ import { zeroMetrics } from "@/lib/metrics";
 import { mockBuild } from "@/mocks/build";
 import { OptimizationGoal } from "@/models";
 import { MockPobCalculationService, PobCalculationService } from "@/services/pob/pob-calculation-service";
+import { ManualTradeMarketService, parseCopiedTradeItem } from "@/services/trade/manual-trade-market-service";
 import { MockTradeMarketService } from "@/services/trade/trade-market-service";
 import { classifyCandidateVerdict, UpgradeOptimizer } from "./upgrade-optimizer";
 
@@ -46,6 +47,50 @@ describe("UpgradeOptimizer", () => {
     });
     expect(result.candidateEvaluations[0].changes.totalDps).toBe(100_000);
     expect(result.candidateEvaluations[0].verdict).toBe("upgrade");
+  });
+
+  it("shows an over-budget PoB upgrade but does not recommend it", async () => {
+    const expensiveWand = parseCopiedTradeItem({
+      id: "pandemonium-spell",
+      slot: "weapon",
+      rawText: `Item Class: Wands
+Rarity: Rare
+Pandemonium Spell
+Synthesised Kinetic Wand
+--------
+109% increased Spell Damage`,
+      price: { amount: 10_000, currency: "divine" },
+      league: "Mirage",
+    });
+    const improvingPob: PobCalculationService = {
+      importBuild: async () => structuredClone(mockBuild),
+      calculateBuild: async (build) => structuredClone(build.metrics),
+      simulateItemReplacement: async () => { throw new Error("not used"); },
+      simulateItemReplacements: async (build, items) => ({
+        baseline: structuredClone(build.metrics),
+        simulations: items.map((item) => ({
+          slot: item.slot,
+          item,
+          metrics: { ...build.metrics, totalDps: build.metrics.totalDps + 100_000 },
+          changes: zeroMetrics(),
+          verification: "pob" as const,
+        })),
+        verification: "pob" as const,
+      }),
+    };
+    const result = await new UpgradeOptimizer(improvingPob, new ManualTradeMarketService([expensiveWand])).optimize({
+      build: mockBuild,
+      budget: { amount: 5, currency: "divine" },
+      goal: "dps",
+      allowedSlots: ["weapon"],
+      league: "Mirage",
+    });
+
+    expect(result.evaluatedCandidates).toBe(1);
+    expect(result.candidateEvaluations[0]).toMatchObject({ verdict: "upgrade", qualified: false });
+    expect(result.candidateEvaluations[0].changes.totalDps).toBe(100_000);
+    expect(result.candidateEvaluations[0].rejectionReasons.join(" ")).toMatch(/above your 5 divine budget/i);
+    expect(result.recommendations).toHaveLength(0);
   });
 
   it("never exceeds the total budget", async () => { const result = await run("balanced", 3); expect(result.combinations.every((combo) => combo.priceInChaos <= result.budgetInChaos)).toBe(true); });
