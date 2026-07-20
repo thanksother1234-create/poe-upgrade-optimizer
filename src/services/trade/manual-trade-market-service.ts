@@ -34,14 +34,12 @@ export interface ManualTradeCandidateInput {
 
 const LISTING_NOTE = /^Note:\s*~(?:price|b\/o)\s+(\d+(?:\.\d+)?)\s+(divine|chaos|mirror)(?:\s+orbs?)?\s*$/i;
 
-export function parseCopiedItemPrice(rawText: string): CurrencyAmount {
+export function parseCopiedItemPrice(rawText: string): CurrencyAmount | null {
   const note = rawText.split(/\r?\n/).map((line) => line.trim()).findLast((line) => /^Note:/i.test(line));
   const match = note?.match(LISTING_NOTE);
-  if (!match) {
-    throw new Error("The copied item needs its trade note, such as `Note: ~price 2 divine` or `Note: ~b/o 50 chaos`.");
-  }
+  if (!match) return null;
   const amount = Number(match[1]);
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("The copied item's trade note contains an invalid price.");
+  if (!Number.isFinite(amount) || amount <= 0) return null;
   return { amount, currency: match[2].toLowerCase() as CurrencyAmount["currency"] };
 }
 
@@ -58,10 +56,11 @@ export function parseCopiedTradeItem(input: ManualTradeCandidateInput): TradeIte
   const name = displayLines[0];
   const baseType = rarity === "normal" ? displayLines[0] : displayLines[1];
   if (!name || !baseType) throw new Error("The copied item is missing its name or base type.");
-  const price = input.price ?? parseCopiedItemPrice(rawText);
-  if (!Number.isFinite(price.amount) || price.amount <= 0 || !["chaos", "divine", "mirror"].includes(price.currency)) {
+  const parsedPrice = input.price ?? parseCopiedItemPrice(rawText);
+  if (parsedPrice && (!Number.isFinite(parsedPrice.amount) || parsedPrice.amount <= 0 || !["chaos", "divine", "mirror"].includes(parsedPrice.currency))) {
     throw new Error("Use a chaos, divine, or mirror listing note.");
   }
+  const price: CurrencyAmount = parsedPrice ?? { amount: 0, currency: "chaos" };
 
   const displayEnd = rarityIndex + (rarity === "normal" ? 2 : 3);
   const modifiers = lines.slice(displayEnd)

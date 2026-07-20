@@ -87,7 +87,11 @@ export class UpgradeOptimizer {
       const priceInChaos = toChaos(await this.trade.estimatePrice(item));
       const score = this.score(batch.baseline, changes, request.goal, priceInChaos);
       const rejectionReasons = this.rejectionReasons(batch.baseline, changes, request.goal, score);
-      if (priceInChaos > budgetInChaos) {
+      if (item.price.amount <= 0) {
+        rejectionReasons.unshift(
+          "No listing price was included. PoB still evaluated the item, but the optimizer cannot confirm that it fits your budget.",
+        );
+      } else if (priceInChaos > budgetInChaos) {
         rejectionReasons.unshift(
           `The listing price (${item.price.amount} ${item.price.currency}) is above your ${request.budget.amount} ${request.budget.currency} budget. PoB still evaluated the item, but it cannot be selected as a recommendation.`,
         );
